@@ -1,5 +1,7 @@
 # Media Quick Edit
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Media Quick Edit is an Obsidian plugin that turns an Obsidian Bases view into an editable media library. It supports ratings, two-state reading/watching status, auto-saved comments, status history, TMDB movie/TV search, and Open Library book search.
 
 ![Media Quick Edit view](docs/media-quick-edit.svg)
