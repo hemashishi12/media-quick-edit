@@ -1,0 +1,10 @@
+{
+  "id": "media-quick-edit",
+  "name": "Media Quick Edit",
+  "version": "0.6.0",
+  "minAppVersion": "1.10.2",
+  "description": "Manage media in Obsidian Bases, edit ratings and statuses, and add entries from TMDB or Open Library.",
+  "author": "FlyingNeko",
+  "authorUrl": "https://github.com/hemashishi12",
+  "isDesktopOnly": false
+}

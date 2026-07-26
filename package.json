@@ -1,0 +1,29 @@
+{
+  "name": "media-quick-edit",
+  "version": "0.6.0",
+  "private": true,
+  "description": "Editable media library view for Obsidian Bases with TMDB and Open Library integration.",
+  "author": "FlyingNeko",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hemashishi12/media-quick-edit.git"
+  },
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test && npm run build",
+    "release:prepare": "npm run check && node scripts/prepare-release.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.25.0",
+    "obsidian": "latest",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "tmdbApiKey": "",
+  "movieFolder": "Media DB/movies",
+  "bookFolder": "Media DB/books",
+  "basePath": "Media DB/library.base",
+  "autoOpenNewEntry": true,
+  "defaultAddType": "movie",
+  "moviePlannedLabel": "想看",
+  "movieCompletedLabel": "看过",
+  "bookPlannedLabel": "想读",
+  "bookCompletedLabel": "读过",
+  "migrationVersion": 2
+}
