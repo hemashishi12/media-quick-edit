@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title description">
+  <title id="title">Media Quick Edit demo</title>
+  <desc id="description">A sanitized example of the editable media library view.</desc>
+  <style>
+    .bg{fill:#191919}.panel{fill:#202020}.line{stroke:#3a3a3a;stroke-width:1}.title{fill:#f1f1f1;font:600 22px system-ui,sans-serif}.head{fill:#ddd;font:600 16px system-ui,sans-serif}.text{fill:#ddd;font:15px system-ui,sans-serif}.muted{fill:#aaa;font:15px system-ui,sans-serif}.star{fill:#f2db58;font:20px system-ui,sans-serif}.accent{fill:#b8a7ff;font:600 16px system-ui,sans-serif}
+  </style>
+  <rect class="bg" width="1200" height="520" rx="14"/>
+  <rect class="panel" x="24" y="22" width="1152" height="476" rx="10"/>
+  <text class="title" x="48" y="62">Media Library</text>
+  <text class="accent" x="48" y="96">Quick Edit</text>
+  <text class="muted" x="155" y="96">5 entries</text>
+  <line class="line" x1="48" y1="116" x2="1152" y2="116"/>
+  <text class="head" x="60" y="148">Title</text><text class="head" x="330" y="148">Type</text><text class="head" x="430" y="148">Rating</text><text class="head" x="590" y="148">Status</text><text class="head" x="715" y="148">Comment</text><text class="head" x="1030" y="148">Finished</text><text class="head" x="292" y="148">+</text>
+  <line class="line" x1="48" y1="166" x2="1152" y2="166"/>
+  <g transform="translate(0 0)"><text class="text" x="60" y="201">The Grand Budapest Hotel</text><text class="muted" x="330" y="201">Movie</text><text class="star" x="430" y="201">★★★★★</text><text class="text" x="590" y="201">Watched</text><text class="text" x="715" y="201">Playful and beautifully composed.</text><text class="muted" x="1030" y="201">2026-07-12</text></g>
+  <line class="line" x1="48" y1="220" x2="1152" y2="220"/>
+  <g><text class="text" x="60" y="255">Little Women</text><text class="muted" x="330" y="255">Book</text><text class="star" x="430" y="255">★★★★☆</text><text class="text" x="590" y="255">Read</text><text class="text" x="715" y="255">Warm, lively, and generous.</text><text class="muted" x="1030" y="255">2026-06-28</text></g>
+  <line class="line" x1="48" y1="274" x2="1152" y2="274"/>
+  <g><text class="text" x="60" y="309">Paddington 2</text><text class="muted" x="330" y="309">Movie</text><text class="star" x="430" y="309">★★★★★</text><text class="text" x="590" y="309">Watched</text><text class="text" x="715" y="309">Kind, funny, and endlessly charming.</text><text class="muted" x="1030" y="309">2026-05-04</text></g>
+  <line class="line" x1="48" y1="328" x2="1152" y2="328"/>
+  <g><text class="text" x="60" y="363">The Hobbit</text><text class="muted" x="330" y="363">Book</text><text class="muted" x="430" y="363">☆☆☆☆☆</text><text class="text" x="590" y="363">To read</text><text class="muted" x="715" y="363">Write a comment…</text><text class="muted" x="1030" y="363">2026-04-20</text></g>
+  <line class="line" x1="48" y1="382" x2="1152" y2="382"/>
+  <g><text class="text" x="60" y="417">Singin’ in the Rain</text><text class="muted" x="330" y="417">Movie</text><text class="star" x="430" y="417">★★★★☆</text><text class="text" x="590" y="417">Watched</text><text class="text" x="715" y="417">Pure joy from beginning to end.</text><text class="muted" x="1030" y="417">2026-03-16</text></g>
+  <line class="line" x1="48" y1="436" x2="1152" y2="436"/>
+  <text class="muted" x="48" y="474">Demo data only · no personal Vault information</text>
+</svg>
