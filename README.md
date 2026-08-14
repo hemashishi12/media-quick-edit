@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Media Quick Edit is an Obsidian plugin that turns an Obsidian Bases view into an editable media library. It supports ratings, two-state reading/watching status, auto-saved comments, status history, TMDB movie/TV search, and Open Library book search.
+Media Quick Edit is an Obsidian plugin that turns Obsidian Bases into an editable media library. It provides both a table-based **Media Quick Edit** view and a cover-based **Bookshelf** view, with ratings, two-state reading/watching status, auto-saved comments, status history, TMDB movie/TV search, and Open Library book search.
 
 ![Media Quick Edit view](docs/media-quick-edit.svg)
 
@@ -33,7 +33,7 @@ Open **Settings → Community plugins → Media Quick Edit** and configure:
 - **TMDB API Key**: stored only in this Vault's local plugin `data.json`.
 - **Movie / TV folder**: destination for TMDB entries.
 - **Book folder**: destination for Open Library entries.
-- **Default Base**: opened by the ribbon shortcut.
+- **Default Base**: opened by the ribbon shortcut. The shortcut first reveals an existing tab for that Base; if it was closed, it restores the last selected view for that Base.
 - **Automatically open new entry**.
 - **Default add type**: movie/TV or book.
 - Movie and book status labels.
@@ -44,9 +44,10 @@ The folder and Base settings include Vault-local pickers. No personal Vault path
 
 ### Create a compatible Base
 
-1. Create a new Base in Obsidian and enable the **Media Quick Edit** view from the view-type menu.
+1. Create or open the Base used for the media library.
 2. Add Base filters for Markdown files in the configured movie/TV and book folders. With the default settings, use `Media DB/movies` and `Media DB/books`.
 3. Select that `.base` file as **Default Base** in the plugin settings.
+4. The plugin automatically adds **Bookshelf** to that Base's view list. There is no need to choose **Add view** manually. Existing quick-edit, gallery, and other views are preserved, and reloading the plugin does not create duplicates.
 
 The plugin does not guess which Base represents your library. This explicit selection prevents it from opening or editing an unrelated Base. The custom view still respects the filters of the Base in which it is used.
 
@@ -59,7 +60,18 @@ Click the `+` button in the **Title** column header.
 - Select a result and its initial planned/completed status.
 - The note is created in the configured folder and is picked up by any Base whose filters include that folder.
 
-Open Library results show title, author, and first publication year. Entries without a cover use a local SVG placeholder.
+Open Library results show title, author, and first publication year. When available, the cover is written to `image`; otherwise the field is left empty and the Bookshelf view generates a designed fallback using the title, author, and a stable color palette.
+
+## Bookshelf view
+
+- Books, movies, and TV series can share one responsive shelf, with compact media-type badges.
+- Each cover naturally leads into the title, author or year, editable five-star rating, and 10-point score.
+- Filter by all media, books, movies, or series; search locally; and sort by recently added, rating, or title.
+- Cover fields are resolved in this order: `image`, `cover`, `poster`, `thumbnail`, `coverUrl`, and `cover_url`. Remote URLs, Markdown image syntax, Obsidian wiki links, and Vault-local images are supported.
+- Missing or failed cover images fall back to a deterministic, designed cover generated from the record title.
+- After a remote cover is displayed successfully, it is resized to a WebP thumbnail with a maximum edge of 540px and stored in `.obsidian/plugins/media-quick-edit/cover-cache/`. Cached covers are preferred on later loads and remain available offline.
+- Large libraries use lazy image loading and batched rendering instead of requesting every remote cover at once.
+- The bookshelf waits until Obsidian injects the Base configuration and query result before initializing its UI, preventing an empty view when configuration is not ready during construction. Later Base updates refresh it automatically.
 
 ## Editing entries
 
@@ -98,7 +110,8 @@ Back up the Vault before enabling a new plugin version that performs a schema mi
 - `data.json` is excluded by `.gitignore` and must never be committed.
 - Movie and TV search terms are sent directly to TMDB.
 - Book search terms are sent directly to Open Library.
-- Poster and cover images are loaded from TMDB or Open Library URLs unless the user downloads them separately.
+- Posters and covers are first loaded from TMDB, Open Library, or another URL stored in the note. A local thumbnail is cached in the current Vault's plugin directory after the image is displayed successfully.
+- The cover cache contains thumbnails only, never the TMDB API key or note content. Deleting `cover-cache` does not delete media entries; it is rebuilt as covers are viewed online again.
 
 ## Data sources and attribution
 
@@ -132,7 +145,9 @@ Open Library requires direct network access. Retry later or check whether `openl
 
 ### A view still shows an old plugin version
 
-Disable and re-enable Media Quick Edit, then reopen the Base.
+After replacing `main.js`, fully restart Obsidian and reopen the Base. A rapid disable/enable cycle can leave an already-open Base using its previous custom-view instance.
+
+If the Vault uses Lazy Loader or a similar delayed-loading plugin, make sure Media Quick Edit is not configured as **Disabled** there. Otherwise it can override Obsidian's enabled state on the next startup.
 
 ## Development
 
@@ -143,7 +158,7 @@ npm test
 npm run build
 ```
 
-Run the complete local verification pipeline with `npm run check`. The automated tests cover empty-Vault startup, portable English and Chinese paths, legacy-status migration, missing TMDB keys, Open Library timeouts, and history updates.
+Run the complete local verification pipeline with `npm run check`. The automated tests cover empty-Vault startup, safe bookshelf initial-render timing, portable English and Chinese paths, legacy-status migration, missing TMDB keys, Open Library timeouts, and history updates.
 
 Development watch mode:
 

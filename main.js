@@ -22,7 +22,7 @@ __export(main_exports, {
   default: () => MediaQuickEditPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian6 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 
 // src/addMediaModal.ts
 var import_obsidian3 = require("obsidian");
@@ -199,7 +199,7 @@ year: ${yaml(year)}
 isbn: ${yaml((item.isbn || [])[0] || "")}
 dataSource: OpenLibrary
 openLibraryKey: ${yaml(item.key || "")}
-image: ${yaml(openLibraryCover(item.cover_i))}
+image: ${yaml(item.cover_i ? openLibraryCover(item.cover_i) : "")}
 status: ${status}
 personalRating: 0
 finished_date: ${today}
@@ -577,8 +577,323 @@ var MediaQuickEditView = class extends import_obsidian4.BasesView {
   }
 };
 
-// src/settings.ts
+// src/mediaShelfView.ts
 var import_obsidian5 = require("obsidian");
+var SHELF_VIEW_TYPE = "media-shelf";
+var BATCH_SIZE = 84;
+var collator2 = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
+function normalizeCoverSource(value) {
+  const candidate = Array.isArray(value) ? value.find((item) => typeof item === "string" && item.trim()) : value;
+  if (typeof candidate !== "string") return "";
+  let source = candidate.trim();
+  const markdown = source.match(/^!\[[^\]]*\]\((.+)\)$/);
+  if (markdown) source = markdown[1].trim();
+  const wiki = source.match(/^!?\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/);
+  if (wiki) source = wiki[1].trim();
+  if (/^data:image\/svg\+xml/i.test(source) && /No(?:%20|\s)cover/i.test(source)) return "";
+  return source;
+}
+function coverVariantFor(title) {
+  let hash = 0;
+  for (const character of title) hash = (hash << 5) - hash + character.codePointAt(0) | 0;
+  return Math.abs(hash) % 6;
+}
+function stringValue(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).slice(0, 3).join("\u3001");
+  return value == null ? "" : String(value);
+}
+function timestamp(value, fallback) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const parsed = Date.parse(String(value || ""));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+var MediaShelfView = class extends import_obsidian5.BasesView {
+  type = SHELF_VIEW_TYPE;
+  rootEl;
+  gridEl;
+  emptyEl;
+  countEl;
+  loadMoreEl;
+  records = [];
+  visibleRecords = [];
+  activeFilter = "all";
+  query = "";
+  renderedCount = 0;
+  filterButtons = /* @__PURE__ */ new Map();
+  observer = null;
+  searchTimer = null;
+  pending = /* @__PURE__ */ new Map();
+  constructor(controller, scrollEl) {
+    super(controller);
+    this.rootEl = scrollEl.createDiv({ cls: "mqe-shelf-view" });
+  }
+  get owner() {
+    return this.app.plugins.getPlugin("media-quick-edit");
+  }
+  onDataUpdated() {
+    this.refresh();
+  }
+  onunload() {
+    this.observer?.disconnect();
+    if (this.searchTimer !== null) window.clearTimeout(this.searchTimer);
+  }
+  ensureShell() {
+    this.rootEl.empty();
+    const header = this.rootEl.createDiv({ cls: "mqe-shelf-header" });
+    const heading = header.createDiv({ cls: "mqe-shelf-heading" });
+    heading.createEl("h2", { text: "\u4E66\u67B6" });
+    this.countEl = heading.createSpan({ cls: "mqe-shelf-count", text: "0 \u90E8\u4F5C\u54C1" });
+    const actions = header.createDiv({ cls: "mqe-shelf-actions" });
+    const searchWrap = actions.createDiv({ cls: "mqe-shelf-search" });
+    searchWrap.createSpan({ cls: "mqe-shelf-search-icon", text: "\u2315" });
+    const search = searchWrap.createEl("input", { type: "search", attr: { placeholder: "\u641C\u7D22\u4E66\u540D\u3001\u7535\u5F71\u6216\u4F5C\u8005", "aria-label": "\u641C\u7D22\u4E66\u67B6" } });
+    search.addEventListener("input", () => {
+      if (this.searchTimer !== null) window.clearTimeout(this.searchTimer);
+      this.searchTimer = window.setTimeout(() => {
+        this.searchTimer = null;
+        this.query = search.value.trim().toLocaleLowerCase("zh-CN");
+        this.applyView();
+      }, 120);
+    });
+    const sort = actions.createEl("select", { cls: "mqe-shelf-sort", attr: { "aria-label": "\u4E66\u67B6\u6392\u5E8F" } });
+    for (const [value, label] of [["recent", "\u6700\u8FD1\u6DFB\u52A0"], ["rating", "\u8BC4\u5206\u6700\u9AD8"], ["title", "\u6807\u9898\u6392\u5E8F"]]) {
+      sort.createEl("option", { text: label, attr: { value } });
+    }
+    sort.value = this.sortState;
+    sort.addEventListener("change", () => {
+      this.config.set("mediaShelfSort", sort.value);
+      this.applyView();
+    });
+    const add = actions.createEl("button", { cls: "mqe-shelf-add", text: "+ \u6DFB\u52A0\u6761\u76EE", attr: { type: "button" } });
+    add.addEventListener("click", () => this.owner.openAddModal());
+    const filters = this.rootEl.createDiv({ cls: "mqe-shelf-filters", attr: { role: "group", "aria-label": "\u5A92\u4F53\u7C7B\u578B" } });
+    for (const [value, label] of [["all", "\u5168\u90E8"], ["book", "\u4E66\u7C4D"], ["movie", "\u7535\u5F71"], ["series", "\u5267\u96C6"]]) {
+      const button = filters.createEl("button", { cls: "mqe-shelf-filter", text: label, attr: { type: "button", "aria-pressed": value === this.activeFilter ? "true" : "false" } });
+      button.addEventListener("click", () => {
+        this.activeFilter = value;
+        this.config.set("mediaShelfFilter", value);
+        this.applyView();
+      });
+      this.filterButtons.set(value, button);
+    }
+    const content = this.rootEl.createDiv({ cls: "mqe-shelf-content" });
+    this.gridEl = content.createDiv({ cls: "mqe-shelf-grid" });
+    this.emptyEl = content.createDiv({ cls: "mqe-shelf-empty", text: "\u5F53\u524D\u7B5B\u9009\u4E0B\u6CA1\u6709\u4F5C\u54C1\u3002" });
+    this.loadMoreEl = content.createEl("button", { cls: "mqe-shelf-more", text: "\u52A0\u8F7D\u66F4\u591A", attr: { type: "button" } });
+    this.loadMoreEl.addEventListener("click", () => this.appendBatch());
+    const savedFilter = String(this.config.get("mediaShelfFilter") || "all");
+    if (["all", "book", "movie", "series"].includes(savedFilter)) this.activeFilter = savedFilter;
+    this.updateFilterButtons();
+    if (typeof IntersectionObserver !== "undefined") {
+      this.observer = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) this.appendBatch();
+      }, { root: this.rootEl.parentElement, rootMargin: "500px 0px" });
+      this.observer.observe(this.loadMoreEl);
+    }
+  }
+  get sortState() {
+    const value = String(this.config.get("mediaShelfSort") || "recent");
+    return value === "rating" || value === "title" ? value : "recent";
+  }
+  refresh() {
+    this.ensureShell();
+    const entries = this.data?.data ?? [];
+    this.records = entries.map((entry) => this.readRecord(entry));
+    this.applyView();
+  }
+  readRecord(entry) {
+    const file = entry.file;
+    const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
+    const image = normalizeCoverSource(
+      frontmatter.image ?? frontmatter.cover ?? frontmatter.poster ?? frontmatter.thumbnail ?? frontmatter.coverUrl ?? frontmatter.cover_url
+    );
+    return {
+      entry,
+      file,
+      title: String(frontmatter.title || file.basename),
+      type: String(frontmatter.type || "movie"),
+      rating: Number(frontmatter.personalRating || 0),
+      status: String(frontmatter.status || "planned"),
+      image,
+      author: stringValue(frontmatter.author || frontmatter.director),
+      year: stringValue(frontmatter.year || String(frontmatter.premiere || "").slice(0, 4)),
+      dateAdded: timestamp(frontmatter.date_added, file.stat.mtime),
+      modified: file.stat.mtime
+    };
+  }
+  applyView() {
+    const query = this.query;
+    this.visibleRecords = this.records.filter((record) => {
+      if (this.activeFilter !== "all" && this.typeGroup(record.type) !== this.activeFilter) return false;
+      if (!query) return true;
+      return `${record.title} ${record.author} ${record.year}`.toLocaleLowerCase("zh-CN").includes(query);
+    });
+    const sort = this.sortState;
+    this.visibleRecords.sort((left, right) => {
+      if (sort === "title") return collator2.compare(left.title, right.title);
+      if (sort === "rating") {
+        if (left.rating <= 0 !== right.rating <= 0) return left.rating <= 0 ? 1 : -1;
+        return right.rating - left.rating || right.modified - left.modified;
+      }
+      return right.dateAdded - left.dateAdded || right.modified - left.modified;
+    });
+    this.gridEl.empty();
+    this.renderedCount = 0;
+    this.emptyEl.hidden = this.visibleRecords.length > 0;
+    this.countEl.setText(`${this.visibleRecords.length} \u90E8\u4F5C\u54C1`);
+    this.updateFilterButtons();
+    this.appendBatch();
+  }
+  appendBatch() {
+    if (this.renderedCount >= this.visibleRecords.length) {
+      this.loadMoreEl.hidden = true;
+      return;
+    }
+    const end = Math.min(this.visibleRecords.length, this.renderedCount + BATCH_SIZE);
+    for (let index = this.renderedCount; index < end; index++) this.renderCard(this.visibleRecords[index]);
+    this.renderedCount = end;
+    const remaining = this.visibleRecords.length - end;
+    this.loadMoreEl.hidden = remaining <= 0;
+    this.loadMoreEl.setText(remaining > 0 ? `\u52A0\u8F7D\u66F4\u591A\uFF08\u5269\u4F59 ${remaining}\uFF09` : "");
+  }
+  renderCard(record) {
+    const card = this.gridEl.createEl("article", { cls: "mqe-shelf-card" });
+    const cover = card.createEl("button", {
+      cls: `mqe-shelf-cover mqe-shelf-cover--${coverVariantFor(record.title)}`,
+      attr: { type: "button", "aria-label": `\u6253\u5F00 ${record.title}` }
+    });
+    cover.addEventListener("click", (event) => this.openRecord(record.file, event));
+    const art = cover.createDiv({ cls: "mqe-shelf-cover-art" });
+    art.createSpan({ cls: "mqe-shelf-cover-orbit" });
+    art.createSpan({ cls: "mqe-shelf-cover-kicker", text: record.author || this.typeLabel(record.type) });
+    art.createSpan({ cls: "mqe-shelf-cover-title", text: record.title });
+    if (record.year) art.createSpan({ cls: "mqe-shelf-cover-year", text: record.year });
+    const imageSource = this.resolveCover(record);
+    if (imageSource) {
+      const image = cover.createEl("img", { cls: "mqe-shelf-cover-image", attr: { alt: `${record.title} \u5C01\u9762`, loading: "lazy", decoding: "async" } });
+      void this.loadCoverImage(image, cover, imageSource);
+    }
+    cover.createSpan({ cls: "mqe-shelf-type", text: this.typeLabel(record.type) });
+    if (record.status !== "completed") cover.createSpan({ cls: "mqe-shelf-planned", text: this.typeGroup(record.type) === "book" ? "\u60F3\u8BFB" : "\u60F3\u770B" });
+    const title = card.createEl("a", { cls: "mqe-shelf-title internal-link", text: record.title, attr: { href: record.file.path, "data-href": record.file.path } });
+    title.addEventListener("click", (event) => {
+      event.preventDefault();
+      this.openRecord(record.file, event);
+    });
+    const byline = [record.author, record.year].filter(Boolean).join(" \xB7 ");
+    card.createDiv({ cls: "mqe-shelf-byline", text: byline || this.typeLabel(record.type) });
+    this.renderRating(card, record);
+  }
+  renderRating(card, record) {
+    const row = card.createDiv({ cls: "mqe-shelf-rating", attr: { "aria-label": record.rating > 0 ? `\u6211\u7684\u8BC4\u5206 ${record.rating} \u5206` : "\u672A\u8BC4\u5206" } });
+    const stars = row.createDiv({ cls: "mqe-shelf-stars" });
+    const buttons = [];
+    const selected = Math.max(0, Math.min(5, Math.round(record.rating / 2)));
+    for (let value = 1; value <= 5; value++) {
+      const button = stars.createEl("button", { cls: `mqe-shelf-star${value <= selected ? " is-active" : ""}`, text: value <= selected ? "\u2605" : "\u2606", attr: { type: "button", title: `${value} \u661F`, "aria-label": `${value} \u661F` } });
+      button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const previous = record.rating;
+        record.rating = value * 2;
+        this.updateRating(buttons, score, record.rating);
+        try {
+          await this.saveRating(record.file, value);
+        } catch (error) {
+          console.error(error);
+          record.rating = previous;
+          this.updateRating(buttons, score, previous);
+          new import_obsidian5.Notice(`\u8BC4\u5206\u4FDD\u5B58\u5931\u8D25\uFF1A${record.title}`);
+        }
+      });
+      buttons.push(button);
+    }
+    const score = row.createSpan({ cls: "mqe-shelf-score", text: record.rating > 0 ? record.rating.toFixed(1) : "\u672A\u8BC4\u5206" });
+  }
+  updateRating(buttons, score, rating) {
+    const selected = Math.max(0, Math.min(5, Math.round(rating / 2)));
+    buttons.forEach((button, index) => {
+      button.toggleClass("is-active", index < selected);
+      button.setText(index < selected ? "\u2605" : "\u2606");
+    });
+    score.setText(rating > 0 ? rating.toFixed(1) : "\u672A\u8BC4\u5206");
+  }
+  async saveRating(file, stars) {
+    const previous = this.pending.get(file.path) ?? Promise.resolve();
+    const next = previous.catch(() => void 0).then(async () => {
+      const patch = ratingPatch(stars);
+      await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+        applyStatusHistory(frontmatter, patch);
+        for (const [key, value] of Object.entries(patch)) if (!key.startsWith("__")) frontmatter[key] = value;
+      });
+    });
+    this.pending.set(file.path, next);
+    try {
+      await next;
+    } finally {
+      if (this.pending.get(file.path) === next) this.pending.delete(file.path);
+    }
+  }
+  resolveCover(record) {
+    if (!record.image) return "";
+    if (/^(https?:|data:|blob:|app:)/i.test(record.image)) return record.image;
+    const linked = this.app.metadataCache.getFirstLinkpathDest?.(record.image, record.file.path) ?? this.app.vault.getAbstractFileByPath(record.image);
+    return linked instanceof import_obsidian5.TFile ? this.app.vault.getResourcePath(linked) : "";
+  }
+  async loadCoverImage(image, cover, source) {
+    const isRemote = /^https?:\/\//i.test(source);
+    let cached = null;
+    if (isRemote) {
+      try {
+        cached = await this.owner.coverCache?.getCachedResource(source) ?? null;
+      } catch (error) {
+        console.debug("Media Quick Edit cover cache lookup failed", error);
+      }
+    }
+    if (!image.isConnected) return;
+    const initialSource = cached || source;
+    image.addEventListener("load", () => {
+      cover.addClass("has-cover-image");
+      if (isRemote && !cached) {
+        void this.owner.coverCache?.cacheRemote(source).then((localSource) => {
+          if (localSource && image.isConnected) image.src = localSource;
+        });
+      }
+    }, { once: true });
+    image.addEventListener("error", () => {
+      if (cached && image.isConnected) {
+        void this.owner.coverCache?.invalidate(source).finally(() => {
+          cached = null;
+          if (!image.isConnected) return;
+          image.addEventListener("error", () => image.remove(), { once: true });
+          image.src = source;
+        });
+      } else image.remove();
+    }, { once: true });
+    image.src = initialSource;
+  }
+  openRecord(file, event) {
+    void this.app.workspace.openLinkText(file.path, "", import_obsidian5.Keymap.isModEvent(event));
+  }
+  updateFilterButtons() {
+    for (const [value, button] of this.filterButtons) {
+      const active = value === this.activeFilter;
+      button.toggleClass("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
+  }
+  typeGroup(type) {
+    if (type === "book") return "book";
+    if (type === "series") return "series";
+    return "movie";
+  }
+  typeLabel(type) {
+    return type === "book" ? "\u4E66\u7C4D" : type === "series" ? "\u5267\u96C6" : type === "musicRelease" ? "\u97F3\u4E50" : type === "game" ? "\u6E38\u620F" : "\u7535\u5F71";
+  }
+};
+
+// src/settings.ts
+var import_obsidian6 = require("obsidian");
 var DEFAULT_SETTINGS = {
   tmdbApiKey: "",
   movieFolder: "Media DB/movies",
@@ -589,9 +904,10 @@ var DEFAULT_SETTINGS = {
   moviePlannedLabel: "\u60F3\u770B",
   movieCompletedLabel: "\u770B\u8FC7",
   bookPlannedLabel: "\u60F3\u8BFB",
-  bookCompletedLabel: "\u8BFB\u8FC7"
+  bookCompletedLabel: "\u8BFB\u8FC7",
+  lastBaseViews: {}
 };
-var PathPickerModal = class extends import_obsidian5.FuzzySuggestModal {
+var PathPickerModal = class extends import_obsidian6.FuzzySuggestModal {
   constructor(app, items, placeholder, choose) {
     super(app);
     this.items = items;
@@ -608,7 +924,7 @@ var PathPickerModal = class extends import_obsidian5.FuzzySuggestModal {
     this.choose(item);
   }
 };
-var MediaQuickEditSettingTab = class extends import_obsidian5.PluginSettingTab {
+var MediaQuickEditSettingTab = class extends import_obsidian6.PluginSettingTab {
   constructor(app, owner) {
     super(app, owner);
     this.owner = owner;
@@ -617,17 +933,17 @@ var MediaQuickEditSettingTab = class extends import_obsidian5.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Media Quick Edit" });
-    new import_obsidian5.Setting(containerEl).setName("TMDB API Key").setDesc("\u4EC5\u4FDD\u5B58\u5728\u5F53\u524D Vault \u7684\u63D2\u4EF6 data.json \u4E2D\uFF0C\u4E0D\u4F1A\u53D1\u9001\u5230\u63D2\u4EF6\u4F5C\u8005\u7684\u670D\u52A1\u5668\u3002").addText((text) => {
+    new import_obsidian6.Setting(containerEl).setName("TMDB API Key").setDesc("\u4EC5\u4FDD\u5B58\u5728\u5F53\u524D Vault \u7684\u63D2\u4EF6 data.json \u4E2D\uFF0C\u4E0D\u4F1A\u53D1\u9001\u5230\u63D2\u4EF6\u4F5C\u8005\u7684\u670D\u52A1\u5668\u3002").addText((text) => {
       text.setPlaceholder("\u8F93\u5165 TMDB v3 API Key").setValue(this.owner.settings.tmdbApiKey);
       text.inputEl.type = "password";
       text.onChange((value) => this.setValue("tmdbApiKey", value.trim()));
     }).addButton((button) => button.setButtonText("\u6D4B\u8BD5\u8FDE\u63A5").onClick(() => this.owner.testTmdbConnection()));
-    new import_obsidian5.Setting(containerEl).setName("Open Library").setDesc("\u4E66\u7C4D\u641C\u7D22\u4F7F\u7528\u516C\u5F00\u63A5\u53E3\uFF0C\u65E0\u9700\u5BC6\u94A5\uFF1B\u67E5\u8BE2\u5185\u5BB9\u4F1A\u76F4\u63A5\u53D1\u9001\u5230 openlibrary.org\u3002").addButton((button) => button.setButtonText("\u6D4B\u8BD5\u8FDE\u63A5").onClick(() => this.owner.testOpenLibraryConnection()));
+    new import_obsidian6.Setting(containerEl).setName("Open Library").setDesc("\u4E66\u7C4D\u641C\u7D22\u4F7F\u7528\u516C\u5F00\u63A5\u53E3\uFF0C\u65E0\u9700\u5BC6\u94A5\uFF1B\u67E5\u8BE2\u5185\u5BB9\u4F1A\u76F4\u63A5\u53D1\u9001\u5230 openlibrary.org\u3002").addButton((button) => button.setButtonText("\u6D4B\u8BD5\u8FDE\u63A5").onClick(() => this.owner.testOpenLibraryConnection()));
     this.addPath("\u7535\u5F71 / \u5267\u96C6\u6587\u4EF6\u5939", "movieFolder", "\u9009\u62E9\u4FDD\u5B58\u7535\u5F71\u548C\u5267\u96C6\u7684\u6587\u4EF6\u5939", "folder");
     this.addPath("\u4E66\u7C4D\u6587\u4EF6\u5939", "bookFolder", "\u9009\u62E9\u4FDD\u5B58\u4E66\u7C4D\u7684\u6587\u4EF6\u5939", "folder");
     this.addPath("\u9ED8\u8BA4 Base", "basePath", "\u9009\u62E9\u5DE6\u4FA7\u680F\u6309\u94AE\u6253\u5F00\u7684 .base \u6587\u4EF6", "base");
-    new import_obsidian5.Setting(containerEl).setName("\u81EA\u52A8\u6253\u5F00\u65B0\u6761\u76EE").addToggle((toggle) => toggle.setValue(this.owner.settings.autoOpenNewEntry).onChange((value) => this.setValue("autoOpenNewEntry", value)));
-    new import_obsidian5.Setting(containerEl).setName("\u9ED8\u8BA4\u6DFB\u52A0\u7C7B\u578B").addDropdown((dropdown) => dropdown.addOption("movie", "\u7535\u5F71 / \u5267\u96C6").addOption("book", "\u4E66\u7C4D").setValue(this.owner.settings.defaultAddType).onChange((value) => this.setValue("defaultAddType", value)));
+    new import_obsidian6.Setting(containerEl).setName("\u81EA\u52A8\u6253\u5F00\u65B0\u6761\u76EE").addToggle((toggle) => toggle.setValue(this.owner.settings.autoOpenNewEntry).onChange((value) => this.setValue("autoOpenNewEntry", value)));
+    new import_obsidian6.Setting(containerEl).setName("\u9ED8\u8BA4\u6DFB\u52A0\u7C7B\u578B").addDropdown((dropdown) => dropdown.addOption("movie", "\u7535\u5F71 / \u5267\u96C6").addOption("book", "\u4E66\u7C4D").setValue(this.owner.settings.defaultAddType).onChange((value) => this.setValue("defaultAddType", value)));
     containerEl.createEl("h3", { text: "\u72B6\u6001\u6807\u7B7E" });
     this.addLabel("\u7535\u5F71\uFF1A\u8BA1\u5212\u72B6\u6001", "moviePlannedLabel", "\u60F3\u770B");
     this.addLabel("\u7535\u5F71\uFF1A\u5B8C\u6210\u72B6\u6001", "movieCompletedLabel", "\u770B\u8FC7");
@@ -636,7 +952,7 @@ var MediaQuickEditSettingTab = class extends import_obsidian5.PluginSettingTab {
   }
   addPath(name, key, description, kind) {
     let input;
-    const setting = new import_obsidian5.Setting(this.containerEl).setName(name).setDesc(description).addText((text) => {
+    const setting = new import_obsidian6.Setting(this.containerEl).setName(name).setDesc(description).addText((text) => {
       input = text;
       text.setValue(String(this.owner.settings[key] || "")).onChange((value) => this.setValue(key, normalizePathValue(value)));
     });
@@ -651,9 +967,10 @@ var MediaQuickEditSettingTab = class extends import_obsidian5.PluginSettingTab {
   async setValue(key, value) {
     this.owner.settings[key] = value;
     await this.owner.saveSettings();
+    if (key === "basePath") await this.owner.ensureShelfViewInConfiguredBase();
   }
   addLabel(name, key, placeholder) {
-    new import_obsidian5.Setting(this.containerEl).setName(name).addText((text) => text.setPlaceholder(placeholder).setValue(String(this.owner.settings[key] || "")).onChange((value) => this.setValue(key, value.trim() || placeholder)));
+    new import_obsidian6.Setting(this.containerEl).setName(name).addText((text) => text.setPlaceholder(placeholder).setValue(String(this.owner.settings[key] || "")).onChange((value) => this.setValue(key, value.trim() || placeholder)));
   }
 };
 function normalizePathValue(value) {
@@ -692,23 +1009,172 @@ function migrateFrontmatter(frontmatter, labels) {
   frontmatter.mediaQuickEditSchema = CURRENT_SCHEMA;
 }
 
+// src/coverCache.ts
+var import_obsidian7 = require("obsidian");
+var THUMBNAIL_WIDTH = 360;
+var THUMBNAIL_HEIGHT = 540;
+var MAX_CONCURRENT_DOWNLOADS = 3;
+function coverCacheKey(source) {
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index++) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+async function createThumbnail(data, contentType) {
+  const blob = new Blob([data], { type: contentType || "image/jpeg" });
+  const bitmap = await createImageBitmap(blob);
+  try {
+    const scale = Math.min(1, THUMBNAIL_WIDTH / bitmap.width, THUMBNAIL_HEIGHT / bitmap.height);
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) throw new Error("Canvas is unavailable");
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(bitmap, 0, 0, width, height);
+    const thumbnail = await new Promise((resolve, reject) => {
+      canvas.toBlob((result) => result ? resolve(result) : reject(new Error("Thumbnail encoding failed")), "image/webp", 0.84);
+    });
+    return thumbnail.arrayBuffer();
+  } finally {
+    bitmap.close();
+  }
+}
+var CoverCache = class {
+  constructor(app, pluginId) {
+    this.app = app;
+    const configDir = this.app.vault.configDir || ".obsidian";
+    this.cacheDir = (0, import_obsidian7.normalizePath)(`${configDir}/plugins/${pluginId}/cover-cache`);
+  }
+  cacheDir;
+  pending = /* @__PURE__ */ new Map();
+  activeDownloads = 0;
+  waiters = [];
+  async getCachedResource(source) {
+    const path = this.cachePath(source);
+    return await this.app.vault.adapter.exists(path) ? this.app.vault.adapter.getResourcePath(path) : null;
+  }
+  cacheRemote(source) {
+    if (!/^https?:\/\//i.test(source)) return Promise.resolve(null);
+    const existing = this.pending.get(source);
+    if (existing) return existing;
+    const task = this.downloadAndCache(source).catch((error) => {
+      console.debug("Media Quick Edit cover cache skipped", source, error);
+      return null;
+    }).finally(() => this.pending.delete(source));
+    this.pending.set(source, task);
+    return task;
+  }
+  async invalidate(source) {
+    const path = this.cachePath(source);
+    if (await this.app.vault.adapter.exists(path)) await this.app.vault.adapter.remove(path);
+  }
+  async downloadAndCache(source) {
+    const cached = await this.getCachedResource(source);
+    if (cached) return cached;
+    await this.acquireSlot();
+    try {
+      const secondCheck = await this.getCachedResource(source);
+      if (secondCheck) return secondCheck;
+      const response = await (0, import_obsidian7.requestUrl)({ url: source, headers: { accept: "image/avif,image/webp,image/*,*/*;q=0.8" } });
+      if (response.status < 200 || response.status >= 300) throw new Error(`Cover request failed with ${response.status}`);
+      const contentType = Object.entries(response.headers).find(([key]) => key.toLowerCase() === "content-type")?.[1]?.split(";")[0] || "image/jpeg";
+      if (!contentType.startsWith("image/")) throw new Error(`Unexpected cover content type: ${contentType}`);
+      const thumbnail = await createThumbnail(response.arrayBuffer, contentType);
+      await this.ensureDirectory();
+      const path = this.cachePath(source);
+      await this.app.vault.adapter.writeBinary(path, thumbnail);
+      return this.app.vault.adapter.getResourcePath(path);
+    } finally {
+      this.releaseSlot();
+    }
+  }
+  cachePath(source) {
+    return (0, import_obsidian7.normalizePath)(`${this.cacheDir}/${coverCacheKey(source)}.webp`);
+  }
+  async ensureDirectory() {
+    if (!await this.app.vault.adapter.exists(this.cacheDir)) await this.app.vault.adapter.mkdir(this.cacheDir);
+  }
+  async acquireSlot() {
+    if (this.activeDownloads >= MAX_CONCURRENT_DOWNLOADS) await new Promise((resolve) => this.waiters.push(resolve));
+    this.activeDownloads += 1;
+  }
+  releaseSlot() {
+    this.activeDownloads = Math.max(0, this.activeDownloads - 1);
+    this.waiters.shift()?.();
+  }
+};
+
+// src/baseViewSetup.ts
+var SHELF_VIEW_BLOCK = ["  - type: media-shelf", "    name: \u4E66\u67B6"];
+function addShelfViewToBase(source) {
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const viewsIndex = lines.findIndex((line) => /^views\s*:/.test(line));
+  if (viewsIndex >= 0) {
+    let end = viewsIndex + 1;
+    while (end < lines.length && (lines[end].trim() === "" || /^\s/.test(lines[end]) || /^\s*#/.test(lines[end]))) end += 1;
+    const viewsBlock = lines.slice(viewsIndex, end).join("\n");
+    if (/^\s*-?\s*type\s*:\s*["']?media-shelf["']?\s*(?:#.*)?$/m.test(viewsBlock)) return source;
+    if (/^views\s*:\s*\[\s*\]\s*(?:#.*)?$/.test(lines[viewsIndex])) {
+      lines.splice(viewsIndex, 1, "views:", ...SHELF_VIEW_BLOCK);
+    } else if (/^views\s*:\s*(?:#.*)?$/.test(lines[viewsIndex])) {
+      lines.splice(end, 0, ...SHELF_VIEW_BLOCK);
+    } else {
+      return source;
+    }
+  } else {
+    while (lines.length && lines.at(-1) === "") lines.pop();
+    if (lines.length) lines.push("");
+    lines.push("views:", ...SHELF_VIEW_BLOCK, "");
+  }
+  return lines.join(newline);
+}
+
 // src/main.ts
-var MediaQuickEditPlugin = class extends import_obsidian6.Plugin {
+var MediaQuickEditPlugin = class extends import_obsidian8.Plugin {
   settings = { ...DEFAULT_SETTINGS };
+  coverCache;
+  watchedBaseControllers = /* @__PURE__ */ new WeakSet();
   async onload() {
-    this.settings = { ...DEFAULT_SETTINGS, ...await this.loadData() || {} };
+    const storedSettings = await this.loadData() || {};
+    this.settings = {
+      ...DEFAULT_SETTINGS,
+      ...storedSettings,
+      lastBaseViews: { ...DEFAULT_SETTINGS.lastBaseViews, ...storedSettings.lastBaseViews || {} }
+    };
+    this.coverCache = new CoverCache(this.app, this.manifest.id);
     this.addSettingTab(new MediaQuickEditSettingTab(this.app, this));
     this.registerBasesView(VIEW_TYPE, {
       name: "\u5A92\u4F53\u5FEB\u901F\u7F16\u8F91",
       icon: "list-pen",
       factory: (controller, scrollEl) => new MediaQuickEditView(controller, scrollEl)
     });
-    this.addRibbonIcon("library-big", "\u6253\u5F00\u5A92\u4F53\u5E93 Base", () => {
-      const base = this.getConfiguredBase();
-      if (!base) return void new import_obsidian6.Notice("\u5C1A\u672A\u8BBE\u7F6E\u6709\u6548\u7684\u9ED8\u8BA4 Base\uFF0C\u8BF7\u5728 Media Quick Edit \u8BBE\u7F6E\u4E2D\u9009\u62E9");
-      void this.app.workspace.getLeaf(true).openFile(base);
+    this.registerBasesView(SHELF_VIEW_TYPE, {
+      name: "\u4E66\u67B6",
+      icon: "library-big",
+      factory: (controller, scrollEl) => new MediaShelfView(controller, scrollEl)
     });
-    this.app.workspace.onLayoutReady(() => void this.runMigration());
+    this.addRibbonIcon("library-big", "\u6253\u5F00\u5A92\u4F53\u5E93 Base", () => void this.openConfiguredBase());
+    this.registerEvent(this.app.workspace.on("layout-change", () => {
+      this.watchOpenBaseViews();
+      void this.rememberOpenBaseViews();
+    }));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
+      this.watchOpenBaseViews();
+      void this.rememberOpenBaseViews();
+    }));
+    this.app.workspace.onLayoutReady(() => {
+      void this.runMigration();
+      void this.ensureShelfViewInConfiguredBase();
+      this.watchOpenBaseViews();
+      void this.rememberOpenBaseViews();
+    });
   }
   async saveSettings() {
     await this.saveData(this.settings);
@@ -721,9 +1187,77 @@ var MediaQuickEditPlugin = class extends import_obsidian6.Plugin {
   }
   getConfiguredBase() {
     const configured = this.settings.basePath ? this.app.vault.getAbstractFileByPath(this.settings.basePath) : null;
-    if (configured instanceof import_obsidian6.TFile && configured.extension === "base") return configured;
+    if (configured instanceof import_obsidian8.TFile && configured.extension === "base") return configured;
     const active = this.app.workspace.getActiveFile();
     return active?.extension === "base" ? active : null;
+  }
+  async openConfiguredBase() {
+    const base = this.getConfiguredBase();
+    if (!base) return void new import_obsidian8.Notice("\u5C1A\u672A\u8BBE\u7F6E\u6709\u6548\u7684\u9ED8\u8BA4 Base\uFF0C\u8BF7\u5728 Media Quick Edit \u8BBE\u7F6E\u4E2D\u9009\u62E9");
+    const openLeaf = this.app.workspace.getLeavesOfType("bases").find((leaf2) => this.getBaseLeafState(leaf2).file === base.path);
+    if (openLeaf) {
+      await this.app.workspace.revealLeaf(openLeaf);
+      this.watchOpenBaseViews();
+      await this.rememberOpenBaseViews();
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf(true);
+    const viewName = this.settings.lastBaseViews[base.path];
+    if (viewName) {
+      try {
+        await leaf.setViewState({ type: "bases", state: { file: base.path, viewName } });
+      } catch (error) {
+        console.debug("Media Quick Edit could not restore the previous Base view", error);
+        await leaf.openFile(base);
+      }
+    } else {
+      await leaf.openFile(base);
+    }
+    await this.app.workspace.revealLeaf(leaf);
+    this.watchOpenBaseViews();
+    await this.rememberOpenBaseViews();
+  }
+  getBaseLeafState(leaf) {
+    const state = leaf.getViewState?.()?.state ?? {};
+    return {
+      file: typeof state.file === "string" ? state.file : "",
+      viewName: typeof state.viewName === "string" ? state.viewName : ""
+    };
+  }
+  watchOpenBaseViews() {
+    for (const leaf of this.app.workspace.getLeavesOfType("bases")) {
+      const controller = leaf.view?.controller;
+      if (!controller || this.watchedBaseControllers.has(controller) || typeof controller.events?.on !== "function") continue;
+      this.watchedBaseControllers.add(controller);
+      this.registerEvent(controller.events.on("view-changed", () => void this.rememberBaseLeaf(leaf)));
+    }
+  }
+  async rememberBaseLeaf(leaf) {
+    const { file, viewName } = this.getBaseLeafState(leaf);
+    if (!file || !viewName || this.settings.lastBaseViews[file] === viewName) return;
+    this.settings.lastBaseViews[file] = viewName;
+    await this.saveSettings();
+  }
+  async rememberOpenBaseViews() {
+    let changed = false;
+    for (const leaf of this.app.workspace.getLeavesOfType("bases")) {
+      const { file, viewName } = this.getBaseLeafState(leaf);
+      if (!file || !viewName || this.settings.lastBaseViews[file] === viewName) continue;
+      this.settings.lastBaseViews[file] = viewName;
+      changed = true;
+    }
+    if (changed) await this.saveSettings();
+  }
+  async ensureShelfViewInConfiguredBase() {
+    const base = this.getConfiguredBase();
+    if (!base) return false;
+    let changed = false;
+    await this.app.vault.process(base, (source) => {
+      const next = addShelfViewToBase(source);
+      changed = next !== source;
+      return next;
+    });
+    return changed;
   }
   async ensureFolder(folderPath) {
     const path = normalizePathValue(folderPath);
@@ -735,22 +1269,22 @@ var MediaQuickEditPlugin = class extends import_obsidian6.Plugin {
     }
   }
   async testTmdbConnection() {
-    if (!this.settings.tmdbApiKey) return void new import_obsidian6.Notice("\u8BF7\u5148\u586B\u5199 TMDB API Key");
+    if (!this.settings.tmdbApiKey) return void new import_obsidian8.Notice("\u8BF7\u5148\u586B\u5199 TMDB API Key");
     try {
       await tmdbRequest(this.settings.tmdbApiKey, "/configuration");
-      new import_obsidian6.Notice("TMDB \u8FDE\u63A5\u6210\u529F");
+      new import_obsidian8.Notice("TMDB \u8FDE\u63A5\u6210\u529F");
     } catch (error) {
       console.error(error);
-      new import_obsidian6.Notice("TMDB \u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5 API Key \u548C\u7F51\u7EDC");
+      new import_obsidian8.Notice("TMDB \u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5 API Key \u548C\u7F51\u7EDC");
     }
   }
   async testOpenLibraryConnection() {
     try {
       await searchOpenLibrary("test", 8e3);
-      new import_obsidian6.Notice("Open Library \u8FDE\u63A5\u6210\u529F");
+      new import_obsidian8.Notice("Open Library \u8FDE\u63A5\u6210\u529F");
     } catch (error) {
       console.error(error);
-      new import_obsidian6.Notice("Open Library \u8FDE\u63A5\u5931\u8D25\u6216\u8D85\u65F6\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC");
+      new import_obsidian8.Notice("Open Library \u8FDE\u63A5\u5931\u8D25\u6216\u8D85\u65F6\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC");
     }
   }
   async runMigration() {
@@ -759,10 +1293,10 @@ var MediaQuickEditPlugin = class extends import_obsidian6.Plugin {
       const result = await migrateLibrary(this.app, this.settings, (type) => this.statusLabels(type));
       this.settings.migrationVersion = CURRENT_SCHEMA;
       await this.saveSettings();
-      if (result.migrated) new import_obsidian6.Notice(`Media Quick Edit \u5DF2\u8FC1\u79FB ${result.migrated} \u4E2A\u6761\u76EE`);
+      if (result.migrated) new import_obsidian8.Notice(`Media Quick Edit \u5DF2\u8FC1\u79FB ${result.migrated} \u4E2A\u6761\u76EE`);
     } catch (error) {
       console.error("Media Quick Edit migration failed", error);
-      new import_obsidian6.Notice("Media Quick Edit \u6570\u636E\u8FC1\u79FB\u5931\u8D25\uFF0C\u7A0D\u540E\u5C06\u91CD\u8BD5");
+      new import_obsidian8.Notice("Media Quick Edit \u6570\u636E\u8FC1\u79FB\u5931\u8D25\uFF0C\u7A0D\u540E\u5C06\u91CD\u8BD5");
     }
   }
 };

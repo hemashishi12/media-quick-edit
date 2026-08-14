@@ -1,11 +1,13 @@
 import { vi } from "vitest";
 
 export const requestUrl = vi.fn();
+export const normalizePath = (value: string) => value.replace(/\\/g, "/").replace(/\/{2,}/g, "/").replace(/^\//, "").replace(/\/$/, "");
 export class App {}
 export class Component {
   app: any;
   constructor(app?: any) { this.app = app; }
   registerDomEvent(..._args: any[]) {}
+  registerEvent(..._args: any[]) {}
 }
 export class Plugin extends Component {
   manifest: any;

@@ -11,6 +11,7 @@ export interface MediaQuickEditSettings {
   movieCompletedLabel: string;
   bookPlannedLabel: string;
   bookCompletedLabel: string;
+  lastBaseViews: Record<string, string>;
   migrationVersion?: number;
 }
 
@@ -24,7 +25,8 @@ export const DEFAULT_SETTINGS: MediaQuickEditSettings = {
   moviePlannedLabel: "想看",
   movieCompletedLabel: "看过",
   bookPlannedLabel: "想读",
-  bookCompletedLabel: "读过"
+  bookCompletedLabel: "读过",
+  lastBaseViews: {}
 };
 
 class PathPickerModal extends FuzzySuggestModal<string> {
@@ -76,6 +78,7 @@ export class MediaQuickEditSettingTab extends PluginSettingTab {
   private async setValue(key: keyof MediaQuickEditSettings, value: any): Promise<void> {
     this.owner.settings[key] = value;
     await this.owner.saveSettings();
+    if (key === "basePath") await this.owner.ensureShelfViewInConfiguredBase();
   }
 
   private addLabel(name: string, key: keyof MediaQuickEditSettings, placeholder: string): void {

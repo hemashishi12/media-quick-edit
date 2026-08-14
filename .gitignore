@@ -2,7 +2,14 @@ node_modules/
 dist/
 release/
 data.json
+.env
+.env.*
+!.env.example
 .obsidian/
+cover-cache/
+shelf-diagnostic-*.json
+*.pem
+*.key
 *.local
 *.log
 .DS_Store

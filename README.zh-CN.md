@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Media Quick Edit 是一款 Obsidian 插件，可以把 Obsidian Bases 视图变成可直接编辑的书影音资料库。它支持五星评分、两种阅读/观看状态、短评自动保存、状态历史、TMDB 电影与剧集搜索，以及 Open Library 图书搜索。
+Media Quick Edit 是一款 Obsidian 插件，可以把 Obsidian Bases 变成可直接编辑的书影音资料库。它同时提供表格式的 **媒体快速编辑** 视图和封面式的 **书架** 视图，支持五星评分、两种阅读/观看状态、短评自动保存、状态历史、TMDB 电影与剧集搜索，以及 Open Library 图书搜索。
 
 ![Media Quick Edit 视图](docs/media-quick-edit.svg)
 
@@ -33,7 +33,7 @@ Media Quick Edit 是一款 Obsidian 插件，可以把 Obsidian Bases 视图变�
 - **TMDB API Key**：只会保存在当前仓库的插件本地配置 `data.json` 中。
 - **电影/剧集文件夹**：TMDB 条目的保存位置。
 - **图书文件夹**：Open Library 条目的保存位置。
-- **默认 Base**：点击左侧栏快捷按钮时打开的 Base。
+- **默认 Base**：点击左侧栏快捷按钮时打开的 Base。按钮会优先切回已打开的同一 Base 页签；页签已关闭时，会恢复该 Base 上次选择的视图。
 - **新增后自动打开条目**。
 - **默认新增类型**：电影/剧集或图书。
 - 电影和图书各自使用的状态文字。
@@ -44,9 +44,10 @@ Media Quick Edit 是一款 Obsidian 插件，可以把 Obsidian Bases 视图变�
 
 ### 创建兼容的 Base
 
-1. 在 Obsidian 中新建一个 Base，并在视图类型中选择 **Media Quick Edit**。
+1. 在 Obsidian 中新建或打开用于书影音资料库的 Base。
 2. 为 Base 添加筛选条件，使其包含所设置的电影/剧集和图书文件夹。默认路径为 `Media DB/movies` 与 `Media DB/books`。
 3. 在插件设置中把该 `.base` 文件选为 **默认 Base**。
+4. 插件会自动把 **书架** 添加到该 Base 的视图列表；不需要手动点击“添加视图”。已有的快速编辑、封面墙和其他视图都会保留，重复加载插件也不会重复添加书架。
 
 插件不会自行猜测哪个 Base 是你的书影音库。明确指定 Base 可以避免插件打开或编辑无关的 Base；自定义视图仍会遵循当前 Base 的筛选条件。
 
@@ -59,7 +60,18 @@ Media Quick Edit 是一款 Obsidian 插件，可以把 Obsidian Bases 视图变�
 - 选择搜索结果，并指定初始状态为“想看/想读”或“看过/读过”。
 - 插件会在所设置的文件夹中创建笔记；筛选条件包含该文件夹的 Base 会自动收录它。
 
-Open Library 搜索结果会显示书名、作者和首次出版年份。没有封面的条目会使用本地 SVG 占位图。
+Open Library 搜索结果会显示书名、作者和首次出版年份。有封面时写入 `image` 字段；没有封面时留空，由书架视图生成带有标题、作者和稳定配色的默认封面。
+
+## 书架视图
+
+- 书籍、电影和剧集可以混排在同一个响应式书架中，并用轻量角标区分类型。
+- 封面下方显示标题、作者或年份，以及可直接点击修改的五星评分和 10 分制数值。
+- 可按全部、书籍、电影和剧集筛选，并支持搜索和按最近添加、评分或标题排序。
+- 封面依次读取 `image`、`cover`、`poster`、`thumbnail`、`coverUrl` 或 `cover_url`，支持网络地址、Markdown 图片语法、Obsidian wiki 链接和仓库内部图片。
+- 缺少封面或图片加载失败时，会根据标题自动生成有设计感且配色稳定的默认封面。
+- 网络封面首次成功显示后，会压缩为最长边不超过 540px 的 WebP 缩略图，保存在 `.obsidian/plugins/media-quick-edit/cover-cache/`。以后优先读取本地缓存，断网时仍可显示已缓存的封面。
+- 大型资料库采用懒加载和分批渲染，避免一次请求全部网络图片。
+- 书架会等待 Obsidian 注入 Base 配置和查询结果后再初始化界面，避免在首次打开时因配置尚未就绪而显示空视图；Base 后续更新时书架也会自动刷新。
 
 ## 编辑条目
 
@@ -98,7 +110,8 @@ status_history:
 - `.gitignore` 已排除 `data.json`，请勿将其提交到代码仓库。
 - 电影和剧集搜索词会直接发送给 TMDB。
 - 图书搜索词会直接发送给 Open Library。
-- 除非用户另行下载，海报和封面会通过 TMDB 或 Open Library 的图片链接加载。
+- 海报和封面首次从 TMDB、Open Library 或笔记中的其他网络地址加载；成功显示后会在当前仓库的插件目录中保存本地缩略图缓存。
+- 封面缓存只包含图片缩略图，不包含 TMDB API Key 或笔记内容。删除 `cover-cache` 文件夹不会删除媒体条目，重新联网浏览时会自动重建。
 
 ## 数据来源与署名
 
@@ -132,7 +145,9 @@ Open Library 需要直接访问网络。请稍后重试，或检查当前网络�
 
 ### 视图仍显示旧版插件
 
-停用后重新启用 Media Quick Edit，再重新打开 Base。
+替换 `main.js` 后完整重启 Obsidian，再重新打开 Base。单纯停用后立即启用时，Obsidian 可能保留已打开的旧 Base 视图实例。
+
+如果仓库使用 Lazy Loader 之类的延迟加载插件，还需确认 Media Quick Edit 的启动类型不是 **Disabled**；否则它会在下次启动时覆盖 Obsidian 的启用状态。
 
 ## 开发
 
@@ -143,7 +158,7 @@ npm test
 npm run build
 ```
 
-运行 `npm run check` 可以执行完整的本地检查流程。自动测试覆盖空仓库启动、中英文可移植路径、旧状态迁移、TMDB Key 缺失、Open Library 超时和历史记录更新等情况。
+运行 `npm run check` 可以执行完整的本地检查流程。自动测试覆盖空仓库启动、书架安全首次渲染时机、中英文可移植路径、旧状态迁移、TMDB Key 缺失、Open Library 超时和历史记录更新等情况。
 
 开发监听模式：
 

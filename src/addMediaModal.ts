@@ -88,7 +88,7 @@ export class AddMediaModal extends Modal {
     const today = localDateString();
     const labels = this.owner.statusLabels("book");
     const path = `${this.owner.settings.bookFolder}/${safeName(`${title} (${year}) [openlibrary]`)}.md`;
-    const content = `---\ntype: book\ntitle: ${yaml(title)}\nauthor: ${yamlArray(item.author_name || [])}\nyear: ${yaml(year)}\nisbn: ${yaml((item.isbn || [])[0] || "")}\ndataSource: OpenLibrary\nopenLibraryKey: ${yaml(item.key || "")}\nimage: ${yaml(openLibraryCover(item.cover_i))}\nstatus: ${status}\npersonalRating: 0\nfinished_date: ${today}\ncomment: ""\ndate_added: ${today}\nstatus_history:\n  - ${yaml(`${today} | ${labels[status]}`)}\nmediaQuickEditSchema: 2\ntags:\n  - mediaDB/book\n---\n\n# ${title}\n\n## 短评\n\n## 阅读记录\n`;
+    const content = `---\ntype: book\ntitle: ${yaml(title)}\nauthor: ${yamlArray(item.author_name || [])}\nyear: ${yaml(year)}\nisbn: ${yaml((item.isbn || [])[0] || "")}\ndataSource: OpenLibrary\nopenLibraryKey: ${yaml(item.key || "")}\nimage: ${yaml(item.cover_i ? openLibraryCover(item.cover_i) : "")}\nstatus: ${status}\npersonalRating: 0\nfinished_date: ${today}\ncomment: ""\ndate_added: ${today}\nstatus_history:\n  - ${yaml(`${today} | ${labels[status]}`)}\nmediaQuickEditSchema: 2\ntags:\n  - mediaDB/book\n---\n\n# ${title}\n\n## 短评\n\n## 阅读记录\n`;
     await this.createFile(path, content, title);
   }
 
