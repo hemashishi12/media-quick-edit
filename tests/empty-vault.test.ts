@@ -3,6 +3,8 @@ import { Notice, TFile } from "obsidian";
 import MediaQuickEditPlugin from "../src/main";
 
 function emptyVaultApp() {
+  const editorChangeHandlers: Array<(editor: any, info: any) => void> = [];
+  const frontmatter: Record<string, any> = {};
   return {
     vault: {
       getAbstractFileByPath: vi.fn(() => null),
@@ -13,11 +15,18 @@ function emptyVaultApp() {
     workspace: {
       getActiveFile: vi.fn(() => null),
       onLayoutReady: vi.fn(),
-      on: vi.fn(() => ({})),
+      on: vi.fn((name: string, callback: (editor: any, info: any) => void) => {
+        if (name === "editor-change") editorChangeHandlers.push(callback);
+        return {};
+      }),
       getLeavesOfType: vi.fn(() => []),
       revealLeaf: vi.fn(),
       getLeaf: vi.fn()
-    }
+    },
+    metadataCache: { getFileCache: vi.fn(() => ({ frontmatter })) },
+    fileManager: { processFrontMatter: vi.fn(async (_file: any, callback: (frontmatter: Record<string, any>) => void) => callback(frontmatter)) },
+    editorChangeHandlers,
+    frontmatter
   } as any;
 }
 
@@ -143,5 +152,33 @@ describe("empty Vault startup", () => {
     await plugin.onload();
     expect(plugin.statusLabels("movie")).toEqual({ planned: "想看", completed: "看过" });
     expect(plugin.statusLabels("book")).toEqual({ planned: "想读", completed: "读过" });
+  });
+
+  it("debounces detail edits and skips repeated writes on the same day", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 23, 18, 0));
+    try {
+      const app = emptyVaultApp();
+      const plugin: any = new MediaQuickEditPlugin(app, { id: "media-quick-edit" });
+      await plugin.onload();
+      const file = new TFile();
+      file.path = "Media DB/movies/Example.md";
+      file.extension = "md";
+      const onEditorChange = app.editorChangeHandlers[0];
+
+      onEditorChange(null, { file });
+      onEditorChange(null, { file });
+      await vi.advanceTimersByTimeAsync(1199);
+      expect(app.fileManager.processFrontMatter).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(app.fileManager.processFrontMatter).toHaveBeenCalledTimes(1);
+      expect(app.frontmatter.last_updated).toBe("2026-08-23");
+
+      onEditorChange(null, { file });
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(app.fileManager.processFrontMatter).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

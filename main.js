@@ -205,6 +205,7 @@ personalRating: 0
 finished_date: ${today}
 comment: ""
 date_added: ${today}
+last_updated: ${today}
 status_history:
   - ${yaml(`${today} | ${labels[status]}`)}
 mediaQuickEditSchema: 2
@@ -261,6 +262,7 @@ personalRating: 0
 finished_date: ${today}
 comment: ""
 date_added: ${today}
+last_updated: ${today}
 status_history:
   - ${yaml(`${today} | ${labels[status]}`)}
 mediaQuickEditSchema: 2
@@ -288,6 +290,25 @@ tags:
 
 // src/mediaQuickEditView.ts
 var import_obsidian4 = require("obsidian");
+
+// src/lastUpdated.ts
+var LAST_UPDATED_PROPERTY = "last_updated";
+var LAST_UPDATED_DEBOUNCE_MS = 1200;
+function touchLastUpdated(frontmatter, date = /* @__PURE__ */ new Date()) {
+  const today = localDateString(date);
+  if (String(frontmatter[LAST_UPDATED_PROPERTY] || "") === today) return false;
+  frontmatter[LAST_UPDATED_PROPERTY] = today;
+  return true;
+}
+function mediaFolders(settings) {
+  return [settings.movieFolder, settings.bookFolder].filter((folder) => Boolean(folder?.trim())).map((folder) => folder.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, ""));
+}
+function isMediaMarkdownFile(file, settings) {
+  if (!file || file.extension !== "md") return false;
+  return mediaFolders(settings).some((folder) => file.path.startsWith(`${folder}/`));
+}
+
+// src/mediaQuickEditView.ts
 var VIEW_TYPE = "media-quick-edit";
 var STATUS_VALUES = ["planned", "completed"];
 var HEADERS = [
@@ -297,7 +318,7 @@ var HEADERS = [
   ["status", "\u72B6\u6001"],
   ["comment", "\u77ED\u8BC4"],
   ["finishedDate", "\u5B8C\u6210\u65E5\u671F"],
-  ["modified", "\u6700\u540E\u4FEE\u6539"]
+  ["modified", "\u6700\u540E\u66F4\u65B0\u65E5\u671F"]
 ];
 var ROW_HEIGHT = 38;
 var OVERSCAN = 8;
@@ -311,6 +332,7 @@ var WriteQueue = class {
     const previous = this.pending.get(file.path) ?? Promise.resolve();
     const next = previous.catch(() => void 0).then(async () => {
       await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+        touchLastUpdated(frontmatter);
         applyStatusHistory(frontmatter, patch);
         for (const [key, value] of Object.entries(patch)) if (!key.startsWith("__")) frontmatter[key] = value;
       });
@@ -511,7 +533,7 @@ var MediaQuickEditView = class extends import_obsidian4.BasesView {
     this.renderStatus(row.insertCell(), file, record.type, record.status);
     this.renderComment(row.insertCell(), file, record.comment);
     row.insertCell().createSpan({ cls: "mqe-date", text: record.finishedDate || "\u2014" });
-    row.insertCell().createSpan({ cls: "mqe-date", text: new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "short", hour12: false }).format(new Date(file.stat.mtime)) });
+    row.insertCell().createSpan({ cls: "mqe-date", text: record.lastUpdated || "\u2014" });
   }
   renderStars(cell, file, rating) {
     const selected = Math.max(0, Math.min(5, Math.round(rating / 2)));
@@ -570,7 +592,7 @@ var MediaQuickEditView = class extends import_obsidian4.BasesView {
   readRecord(entry) {
     const file = entry.file;
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {};
-    return { entry, title: String(fm.title || file.basename), type: String(fm.type || ""), rating: Number(fm.personalRating || 0), status: fm.status === "completed" ? "completed" : "planned", comment: String(fm.comment || ""), finishedDate: String(fm.finished_date || ""), modified: file.stat.mtime };
+    return { entry, title: String(fm.title || file.basename), type: String(fm.type || ""), rating: Number(fm.personalRating || 0), status: fm.status === "completed" ? "completed" : "planned", comment: String(fm.comment || ""), finishedDate: String(fm.finished_date || ""), lastUpdated: String(fm[LAST_UPDATED_PROPERTY] || localDateString(new Date(file.stat.mtime))), modified: file.stat.mtime };
   }
   typeLabel(type) {
     return type === "book" ? "\u4E66" : type === "series" ? "\u5267\u96C6" : type === "musicRelease" ? "\u97F3\u4E50" : type === "game" ? "\u6E38\u620F" : "\u7535\u5F71";
@@ -823,6 +845,7 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
     const next = previous.catch(() => void 0).then(async () => {
       const patch = ratingPatch(stars);
       await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+        touchLastUpdated(frontmatter);
         applyStatusHistory(frontmatter, patch);
         for (const [key, value] of Object.entries(patch)) if (!key.startsWith("__")) frontmatter[key] = value;
       });
@@ -1141,6 +1164,9 @@ var MediaQuickEditPlugin = class extends import_obsidian8.Plugin {
   settings = { ...DEFAULT_SETTINGS };
   coverCache;
   watchedBaseControllers = /* @__PURE__ */ new WeakSet();
+  lastUpdatedTimers = /* @__PURE__ */ new Map();
+  lastUpdatedDates = /* @__PURE__ */ new Map();
+  lastUpdatedWrites = /* @__PURE__ */ new Set();
   async onload() {
     const storedSettings = await this.loadData() || {};
     this.settings = {
@@ -1160,6 +1186,10 @@ var MediaQuickEditPlugin = class extends import_obsidian8.Plugin {
       icon: "library-big",
       factory: (controller, scrollEl) => new MediaShelfView(controller, scrollEl)
     });
+    this.registerEvent(this.app.workspace.on("editor-change", (_editor, info) => {
+      const file = info?.file;
+      if (isMediaMarkdownFile(file, this.settings)) this.scheduleLastUpdated(file);
+    }));
     this.addRibbonIcon("library-big", "\u6253\u5F00\u5A92\u4F53\u5E93 Base", () => void this.openConfiguredBase());
     this.registerEvent(this.app.workspace.on("layout-change", () => {
       this.watchOpenBaseViews();
@@ -1297,6 +1327,39 @@ var MediaQuickEditPlugin = class extends import_obsidian8.Plugin {
     } catch (error) {
       console.error("Media Quick Edit migration failed", error);
       new import_obsidian8.Notice("Media Quick Edit \u6570\u636E\u8FC1\u79FB\u5931\u8D25\uFF0C\u7A0D\u540E\u5C06\u91CD\u8BD5");
+    }
+  }
+  onunload() {
+    for (const timer of this.lastUpdatedTimers.values()) globalThis.clearTimeout(timer);
+    this.lastUpdatedTimers.clear();
+  }
+  scheduleLastUpdated(file) {
+    const today = localDateString();
+    if (this.lastUpdatedDates.get(file.path) === today || this.lastUpdatedWrites.has(file.path)) return;
+    const cached = this.app.metadataCache.getFileCache(file)?.frontmatter?.[LAST_UPDATED_PROPERTY];
+    if (String(cached || "") === today) {
+      this.lastUpdatedDates.set(file.path, today);
+      return;
+    }
+    const oldTimer = this.lastUpdatedTimers.get(file.path);
+    if (oldTimer !== void 0) globalThis.clearTimeout(oldTimer);
+    this.lastUpdatedTimers.set(file.path, globalThis.setTimeout(() => {
+      this.lastUpdatedTimers.delete(file.path);
+      void this.updateLastUpdated(file);
+    }, LAST_UPDATED_DEBOUNCE_MS));
+  }
+  async updateLastUpdated(file) {
+    if (!isMediaMarkdownFile(file, this.settings) || this.lastUpdatedWrites.has(file.path)) return;
+    this.lastUpdatedWrites.add(file.path);
+    try {
+      await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+        touchLastUpdated(frontmatter);
+      });
+      this.lastUpdatedDates.set(file.path, localDateString());
+    } catch (error) {
+      console.error("Media Quick Edit last-updated write failed", error);
+    } finally {
+      this.lastUpdatedWrites.delete(file.path);
     }
   }
 };

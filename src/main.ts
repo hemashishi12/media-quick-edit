@@ -8,11 +8,16 @@ import { CURRENT_SCHEMA, migrateLibrary } from "./migration";
 import { searchOpenLibrary } from "./openLibrary";
 import { CoverCache } from "./coverCache";
 import { addShelfViewToBase } from "./baseViewSetup";
+import { localDateString } from "./history";
+import { isMediaMarkdownFile, LAST_UPDATED_DEBOUNCE_MS, LAST_UPDATED_PROPERTY, touchLastUpdated } from "./lastUpdated";
 
 export default class MediaQuickEditPlugin extends Plugin {
   settings: MediaQuickEditSettings = { ...DEFAULT_SETTINGS };
   coverCache: CoverCache;
   private watchedBaseControllers = new WeakSet<object>();
+  private lastUpdatedTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private lastUpdatedDates = new Map<string, string>();
+  private lastUpdatedWrites = new Set<string>();
 
   async onload(): Promise<void> {
     const storedSettings = (await this.loadData()) || {};
@@ -33,6 +38,10 @@ export default class MediaQuickEditPlugin extends Plugin {
       icon: "library-big",
       factory: (controller, scrollEl) => new MediaShelfView(controller, scrollEl)
     });
+    this.registerEvent(this.app.workspace.on("editor-change", (_editor, info) => {
+      const file = info?.file;
+      if (isMediaMarkdownFile(file, this.settings)) this.scheduleLastUpdated(file);
+    }));
     this.addRibbonIcon("library-big", "打开媒体库 Base", () => void this.openConfiguredBase());
     this.registerEvent(this.app.workspace.on("layout-change", () => {
       this.watchOpenBaseViews();
@@ -183,6 +192,42 @@ export default class MediaQuickEditPlugin extends Plugin {
     } catch (error) {
       console.error("Media Quick Edit migration failed", error);
       new Notice("Media Quick Edit 数据迁移失败，稍后将重试");
+    }
+  }
+
+  onunload(): void {
+    for (const timer of this.lastUpdatedTimers.values()) globalThis.clearTimeout(timer);
+    this.lastUpdatedTimers.clear();
+  }
+
+  private scheduleLastUpdated(file: TFile): void {
+    const today = localDateString();
+    if (this.lastUpdatedDates.get(file.path) === today || this.lastUpdatedWrites.has(file.path)) return;
+    const cached = this.app.metadataCache.getFileCache(file)?.frontmatter?.[LAST_UPDATED_PROPERTY];
+    if (String(cached || "") === today) {
+      this.lastUpdatedDates.set(file.path, today);
+      return;
+    }
+    const oldTimer = this.lastUpdatedTimers.get(file.path);
+    if (oldTimer !== undefined) globalThis.clearTimeout(oldTimer);
+    this.lastUpdatedTimers.set(file.path, globalThis.setTimeout(() => {
+      this.lastUpdatedTimers.delete(file.path);
+      void this.updateLastUpdated(file);
+    }, LAST_UPDATED_DEBOUNCE_MS));
+  }
+
+  private async updateLastUpdated(file: TFile): Promise<void> {
+    if (!isMediaMarkdownFile(file, this.settings) || this.lastUpdatedWrites.has(file.path)) return;
+    this.lastUpdatedWrites.add(file.path);
+    try {
+      await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, any>) => {
+        touchLastUpdated(frontmatter);
+      });
+      this.lastUpdatedDates.set(file.path, localDateString());
+    } catch (error) {
+      console.error("Media Quick Edit last-updated write failed", error);
+    } finally {
+      this.lastUpdatedWrites.delete(file.path);
     }
   }
 }

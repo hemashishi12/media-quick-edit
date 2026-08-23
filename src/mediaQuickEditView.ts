@@ -1,11 +1,12 @@
 import { BasesView, Keymap, Notice, TFile } from "obsidian";
-import { applyStatusHistory, commentPatch, ratingPatch, statusPatch, StatusValue } from "./history";
+import { applyStatusHistory, commentPatch, localDateString, ratingPatch, statusPatch, StatusValue } from "./history";
+import { LAST_UPDATED_PROPERTY, touchLastUpdated } from "./lastUpdated";
 
 const VIEW_TYPE = "media-quick-edit";
 const STATUS_VALUES: StatusValue[] = ["planned", "completed"];
 const HEADERS = [
   ["title", "标题"], ["type", "类型"], ["rating", "我的评分"], ["status", "状态"],
-  ["comment", "短评"], ["finishedDate", "完成日期"], ["modified", "最后修改"]
+  ["comment", "短评"], ["finishedDate", "完成日期"], ["modified", "最后更新日期"]
 ] as const;
 const ROW_HEIGHT = 38;
 const OVERSCAN = 8;
@@ -13,7 +14,7 @@ const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base"
 
 interface RecordItem {
   entry: any; title: string; type: string; rating: number; status: StatusValue;
-  comment: string; finishedDate: string; modified: number;
+  comment: string; finishedDate: string; lastUpdated: string; modified: number;
 }
 
 class WriteQueue {
@@ -23,6 +24,7 @@ class WriteQueue {
     const previous = this.pending.get(file.path) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(async () => {
       await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, any>) => {
+        touchLastUpdated(frontmatter);
         applyStatusHistory(frontmatter, patch);
         for (const [key, value] of Object.entries(patch)) if (!key.startsWith("__")) frontmatter[key] = value;
       });
@@ -147,7 +149,7 @@ export class MediaQuickEditView extends BasesView {
     title.onclick = (event) => { event.preventDefault(); void this.app.workspace.openLinkText(file.path, "", Keymap.isModEvent(event)); };
     row.insertCell().createSpan({ cls: "mqe-type", text: this.typeLabel(record.type) });
     this.renderStars(row.insertCell(), file, record.rating); this.renderStatus(row.insertCell(), file, record.type, record.status); this.renderComment(row.insertCell(), file, record.comment);
-    row.insertCell().createSpan({ cls: "mqe-date", text: record.finishedDate || "—" }); row.insertCell().createSpan({ cls: "mqe-date", text: new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "short", hour12: false }).format(new Date(file.stat.mtime)) });
+    row.insertCell().createSpan({ cls: "mqe-date", text: record.finishedDate || "—" }); row.insertCell().createSpan({ cls: "mqe-date", text: record.lastUpdated || "—" });
   }
 
   private renderStars(cell: HTMLTableCellElement, file: TFile, rating: number): void {
@@ -165,7 +167,7 @@ export class MediaQuickEditView extends BasesView {
   }
   private async saveComment(file: TFile, comment: string): Promise<void> { const type = this.app.metadataCache.getFileCache(file)?.frontmatter?.type === "book" ? "book" : "movie"; await this.apply(file, commentPatch(comment, this.owner.statusLabels(type).completed), "短评已保存"); this.drafts.delete(file.path); }
   private async apply(file: TFile, patch: Record<string, any>, message: string): Promise<boolean> { this.busy.add(file.path); try { await this.queue.update(file, patch); return true; } catch (error) { console.error(error); new Notice(`保存失败：${file.basename}`); return false; } finally { this.busy.delete(file.path); } }
-  private readRecord(entry: any): RecordItem { const file = entry.file as TFile; const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {}; return { entry, title: String(fm.title || file.basename), type: String(fm.type || ""), rating: Number(fm.personalRating || 0), status: fm.status === "completed" ? "completed" : "planned", comment: String(fm.comment || ""), finishedDate: String(fm.finished_date || ""), modified: file.stat.mtime }; }
+  private readRecord(entry: any): RecordItem { const file = entry.file as TFile; const fm = this.app.metadataCache.getFileCache(file)?.frontmatter || {}; return { entry, title: String(fm.title || file.basename), type: String(fm.type || ""), rating: Number(fm.personalRating || 0), status: fm.status === "completed" ? "completed" : "planned", comment: String(fm.comment || ""), finishedDate: String(fm.finished_date || ""), lastUpdated: String(fm[LAST_UPDATED_PROPERTY] || localDateString(new Date(file.stat.mtime))), modified: file.stat.mtime }; }
   private typeLabel(type: string): string { return type === "book" ? "书" : type === "series" ? "剧集" : type === "musicRelease" ? "音乐" : type === "game" ? "游戏" : "电影"; }
 }
 

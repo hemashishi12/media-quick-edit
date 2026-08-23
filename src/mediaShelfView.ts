@@ -1,5 +1,6 @@
 import { BasesView, Keymap, Notice, TFile } from "obsidian";
 import { applyStatusHistory, ratingPatch } from "./history";
+import { touchLastUpdated } from "./lastUpdated";
 
 export const SHELF_VIEW_TYPE = "media-shelf";
 
@@ -284,6 +285,7 @@ export class MediaShelfView extends BasesView {
     const next = previous.catch(() => undefined).then(async () => {
       const patch = ratingPatch(stars);
       await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, any>) => {
+        touchLastUpdated(frontmatter);
         applyStatusHistory(frontmatter, patch);
         for (const [key, value] of Object.entries(patch)) if (!key.startsWith("__")) frontmatter[key] = value;
       });

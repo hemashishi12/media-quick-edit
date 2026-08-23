@@ -80,6 +80,7 @@ Open Library results show title, author, and first publication year. When availa
 - Status has two internal values: `planned` and `completed`.
 - Status labels are configurable separately for movies and books.
 - Comments save automatically; adding a comment marks the entry completed.
+- Editing a media note's detail page updates `last_updated` after 1.2 seconds of inactivity. The date is written at most once per entry per local calendar day.
 - Column widths and sorting are saved in the Base view configuration.
 - Unrated entries always sort after rated entries.
 - Entries sharing the same completion date use file modification time as the secondary sort key.
@@ -93,6 +94,8 @@ status_history:
   - 2026-07-25 | 想看
   - 2026-07-26 | 评分：8分
 ```
+
+The `last_updated` property uses the local date in `YYYY-MM-DD` format and is added automatically to newly created entries. Existing entries receive it the first time their detail page is edited.
 
 The plugin migrates media notes in the configured folders to schema 2:
 

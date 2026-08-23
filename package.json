@@ -1,6 +1,6 @@
 {
   "name": "media-quick-edit",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "description": "Editable media library view for Obsidian Bases with TMDB and Open Library integration.",
   "author": "FlyingNeko",
