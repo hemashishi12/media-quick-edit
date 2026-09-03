@@ -1,5 +1,5 @@
-import { BasesView, Keymap, Notice, TFile } from "obsidian";
-import { applyStatusHistory, ratingPatch } from "./history";
+import { BasesView, Keymap, Menu, Notice, setIcon, TFile } from "obsidian";
+import { applyStatusHistory, commentPatch, ratingPatch } from "./history";
 import { touchLastUpdated } from "./lastUpdated";
 
 export const SHELF_VIEW_TYPE = "media-shelf";
@@ -13,6 +13,7 @@ interface ShelfRecord {
   title: string;
   type: string;
   rating: number;
+  comment: string;
   status: string;
   image: string;
   author: string;
@@ -69,6 +70,9 @@ export class MediaShelfView extends BasesView {
   private observer: IntersectionObserver | null = null;
   private searchTimer: number | null = null;
   private pending = new Map<string, Promise<void>>();
+  private activeCommentEditor: { file: TFile; original: string; draft: string } | null = null;
+  private commentCommitPath = "";
+  private commentFocusTimer: number | null = null;
 
   constructor(controller: any, scrollEl: HTMLElement) {
     super(controller);
@@ -82,6 +86,7 @@ export class MediaShelfView extends BasesView {
   onunload(): void {
     this.observer?.disconnect();
     if (this.searchTimer !== null) window.clearTimeout(this.searchTimer);
+    if (this.commentFocusTimer !== null) window.clearTimeout(this.commentFocusTimer);
   }
 
   private ensureShell(): void {
@@ -170,6 +175,7 @@ export class MediaShelfView extends BasesView {
       title: String(frontmatter.title || file.basename),
       type: String(frontmatter.type || "movie"),
       rating: Number(frontmatter.personalRating || 0),
+      comment: String(frontmatter.comment || ""),
       status: String(frontmatter.status || "planned"),
       image,
       author: stringValue(frontmatter.author || frontmatter.director),
@@ -219,7 +225,18 @@ export class MediaShelfView extends BasesView {
 
   private renderCard(record: ShelfRecord): void {
     const card = this.gridEl.createEl("article", { cls: "mqe-shelf-card" });
-    const cover = card.createEl("button", {
+    card.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const menu = new Menu();
+      menu.addItem((item) => item
+        .setTitle(record.comment ? "编辑短评" : "添加短评")
+        .setIcon("message-square")
+        .onClick(() => this.openCommentEditor(record)));
+      menu.showAtMouseEvent(event);
+    });
+    const coverWrap = card.createDiv({ cls: "mqe-shelf-cover-wrap" });
+    const cover = coverWrap.createEl("button", {
       cls: `mqe-shelf-cover mqe-shelf-cover--${coverVariantFor(record.title)}`,
       attr: { type: "button", "aria-label": `打开 ${record.title}` }
     });
@@ -237,6 +254,16 @@ export class MediaShelfView extends BasesView {
     }
     cover.createSpan({ cls: "mqe-shelf-type", text: this.typeLabel(record.type) });
     if (record.status !== "completed") cover.createSpan({ cls: "mqe-shelf-planned", text: this.typeGroup(record.type) === "book" ? "想读" : "想看" });
+    const edit = coverWrap.createEl("button", {
+      cls: "mqe-shelf-cover-edit",
+      attr: { type: "button", title: record.comment ? "编辑短评" : "添加短评", "aria-label": record.comment ? "编辑短评" : "添加短评" }
+    });
+    setIcon(edit, "pencil");
+    edit.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openCommentEditor(record);
+    });
 
     const title = card.createEl("a", { cls: "mqe-shelf-title internal-link", text: record.title, attr: { href: record.file.path, "data-href": record.file.path } });
     title.addEventListener("click", (event) => { event.preventDefault(); this.openRecord(record.file, event); });
@@ -247,8 +274,18 @@ export class MediaShelfView extends BasesView {
 
   private renderRating(card: HTMLElement, record: ShelfRecord): void {
     const row = card.createDiv({ cls: "mqe-shelf-rating", attr: { "aria-label": record.rating > 0 ? `我的评分 ${record.rating} 分` : "未评分" } });
+    this.renderRatingContent(row, record);
+  }
+
+  private renderRatingContent(row: HTMLElement, record: ShelfRecord): void {
+    row.empty();
+    row.setAttribute("aria-label", record.rating > 0 ? `我的评分 ${record.rating} 分` : "未评分");
+    if (this.activeCommentEditor?.file.path === record.file.path) {
+      this.renderCommentEditor(row, record);
+      return;
+    }
+
     const stars = row.createDiv({ cls: "mqe-shelf-stars" });
-    const buttons: HTMLButtonElement[] = [];
     const selected = Math.max(0, Math.min(5, Math.round(record.rating / 2)));
     for (let value = 1; value <= 5; value++) {
       const button = stars.createEl("button", { cls: `mqe-shelf-star${value <= selected ? " is-active" : ""}`, text: value <= selected ? "★" : "☆", attr: { type: "button", title: `${value} 星`, "aria-label": `${value} 星` } });
@@ -257,33 +294,111 @@ export class MediaShelfView extends BasesView {
         event.stopPropagation();
         const previous = record.rating;
         record.rating = value * 2;
-        this.updateRating(buttons, score, record.rating);
+        this.openCommentEditor(record, row);
         try { await this.saveRating(record.file, value); }
         catch (error) {
           console.error(error);
           record.rating = previous;
-          this.updateRating(buttons, score, previous);
           new Notice(`评分保存失败：${record.title}`);
         }
       });
-      buttons.push(button);
     }
     const score = row.createSpan({ cls: "mqe-shelf-score", text: record.rating > 0 ? record.rating.toFixed(1) : "未评分" });
   }
 
-  private updateRating(buttons: HTMLButtonElement[], score: HTMLElement, rating: number): void {
-    const selected = Math.max(0, Math.min(5, Math.round(rating / 2)));
-    buttons.forEach((button, index) => {
-      button.toggleClass("is-active", index < selected);
-      button.setText(index < selected ? "★" : "☆");
+  private openCommentEditor(record: ShelfRecord, row?: HTMLElement): void {
+    if (this.activeCommentEditor?.file.path === record.file.path) return;
+    if (this.activeCommentEditor) {
+      const previous = this.activeCommentEditor;
+      this.activeCommentEditor = null;
+      if (previous.draft !== previous.original) {
+        void this.saveComment(previous.file, previous.draft).catch((error) => {
+          console.error(error);
+          new Notice(`短评保存失败：${previous.file.basename}`);
+        });
+      }
+    }
+    this.activeCommentEditor = { file: record.file, original: record.comment, draft: record.comment };
+    if (row) this.renderRatingContent(row, record);
+    else this.applyView();
+  }
+
+  private renderCommentEditor(row: HTMLElement, record: ShelfRecord): void {
+    const state = this.activeCommentEditor;
+    if (!state || state.file.path !== record.file.path) return;
+    const editor = row.createDiv({ cls: "mqe-shelf-comment-editor" });
+    const input = editor.createEl("input", {
+      cls: "mqe-shelf-comment-input",
+      type: "text",
+      value: state.draft,
+      attr: { placeholder: "写短评……", "aria-label": `为 ${record.title} 写短评` }
     });
-    score.setText(rating > 0 ? rating.toFixed(1) : "未评分");
+    input.addEventListener("input", () => {
+      if (this.activeCommentEditor?.file.path === record.file.path) this.activeCommentEditor.draft = input.value;
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.cancelCommentEditor(record, row);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        void this.commitCommentEditor(record, row, input);
+      }
+    });
+    input.addEventListener("blur", () => {
+      if (input.isConnected) void this.commitCommentEditor(record, row, input);
+    });
+    if (this.commentFocusTimer !== null) window.clearTimeout(this.commentFocusTimer);
+    this.commentFocusTimer = window.setTimeout(() => {
+      this.commentFocusTimer = null;
+      if (!input.isConnected || this.activeCommentEditor?.file.path !== record.file.path) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }, 0);
+  }
+
+  private cancelCommentEditor(record: ShelfRecord, row: HTMLElement): void {
+    if (this.activeCommentEditor?.file.path !== record.file.path) return;
+    this.activeCommentEditor = null;
+    this.renderRatingContent(row, record);
+  }
+
+  private async commitCommentEditor(record: ShelfRecord, row: HTMLElement, input: HTMLInputElement): Promise<void> {
+    const state = this.activeCommentEditor;
+    if (!state || state.file.path !== record.file.path || this.commentCommitPath === record.file.path) return;
+    state.draft = input.value;
+    this.commentCommitPath = record.file.path;
+    this.activeCommentEditor = null;
+    this.renderRatingContent(row, record);
+    try {
+      if (state.draft !== state.original) {
+        await this.saveComment(record.file, state.draft);
+        record.comment = state.draft;
+      }
+    } catch (error) {
+      console.error(error);
+      this.activeCommentEditor = state;
+      this.commentCommitPath = "";
+      this.applyView();
+      new Notice(`短评保存失败：${record.title}`);
+      return;
+    }
+    this.commentCommitPath = "";
+    this.applyView();
   }
 
   private async saveRating(file: TFile, stars: number): Promise<void> {
+    await this.savePatch(file, ratingPatch(stars));
+  }
+
+  private async saveComment(file: TFile, comment: string): Promise<void> {
+    const type = this.app.metadataCache.getFileCache(file)?.frontmatter?.type === "book" ? "book" : "movie";
+    await this.savePatch(file, commentPatch(comment, this.owner.statusLabels(type).completed));
+  }
+
+  private async savePatch(file: TFile, patch: Record<string, any>): Promise<void> {
     const previous = this.pending.get(file.path) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(async () => {
-      const patch = ratingPatch(stars);
       await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, any>) => {
         touchLastUpdated(frontmatter);
         applyStatusHistory(frontmatter, patch);

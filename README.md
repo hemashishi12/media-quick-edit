@@ -66,6 +66,7 @@ Open Library results show title, author, and first publication year. When availa
 
 - Books, movies, and TV series can share one responsive shelf, with compact media-type badges.
 - Each cover naturally leads into the title, author or year, editable five-star rating, and 10-point score.
+- Add or edit a comment with the pencil button at the bottom-right of the cover, the card context menu, or the editor that appears after rating an entry.
 - Filter by all media, books, movies, or series; search locally; and sort by recently added, rating, or title.
 - Cover fields are resolved in this order: `image`, `cover`, `poster`, `thumbnail`, `coverUrl`, and `cover_url`. Remote URLs, Markdown image syntax, Obsidian wiki links, and Vault-local images are supported.
 - Missing or failed cover images fall back to a deterministic, designed cover generated from the record title.
@@ -80,6 +81,7 @@ Open Library results show title, author, and first publication year. When availa
 - Status has two internal values: `planned` and `completed`.
 - Status labels are configurable separately for movies and books.
 - Comments save automatically; adding a comment marks the entry completed.
+- Bookshelf comments save on blur or Enter and can be cancelled with Escape; a failed save keeps the editor open for retry.
 - Editing a media note's detail page updates `last_updated` after 1.2 seconds of inactivity. The date is written at most once per entry per local calendar day.
 - Column widths and sorting are saved in the Base view configuration.
 - Unrated entries always sort after rated entries.

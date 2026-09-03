@@ -645,6 +645,9 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
   observer = null;
   searchTimer = null;
   pending = /* @__PURE__ */ new Map();
+  activeCommentEditor = null;
+  commentCommitPath = "";
+  commentFocusTimer = null;
   constructor(controller, scrollEl) {
     super(controller);
     this.rootEl = scrollEl.createDiv({ cls: "mqe-shelf-view" });
@@ -658,6 +661,7 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
   onunload() {
     this.observer?.disconnect();
     if (this.searchTimer !== null) window.clearTimeout(this.searchTimer);
+    if (this.commentFocusTimer !== null) window.clearTimeout(this.commentFocusTimer);
   }
   ensureShell() {
     this.rootEl.empty();
@@ -735,6 +739,7 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
       title: String(frontmatter.title || file.basename),
       type: String(frontmatter.type || "movie"),
       rating: Number(frontmatter.personalRating || 0),
+      comment: String(frontmatter.comment || ""),
       status: String(frontmatter.status || "planned"),
       image,
       author: stringValue(frontmatter.author || frontmatter.director),
@@ -780,7 +785,15 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
   }
   renderCard(record) {
     const card = this.gridEl.createEl("article", { cls: "mqe-shelf-card" });
-    const cover = card.createEl("button", {
+    card.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const menu = new import_obsidian5.Menu();
+      menu.addItem((item) => item.setTitle(record.comment ? "\u7F16\u8F91\u77ED\u8BC4" : "\u6DFB\u52A0\u77ED\u8BC4").setIcon("message-square").onClick(() => this.openCommentEditor(record)));
+      menu.showAtMouseEvent(event);
+    });
+    const coverWrap = card.createDiv({ cls: "mqe-shelf-cover-wrap" });
+    const cover = coverWrap.createEl("button", {
       cls: `mqe-shelf-cover mqe-shelf-cover--${coverVariantFor(record.title)}`,
       attr: { type: "button", "aria-label": `\u6253\u5F00 ${record.title}` }
     });
@@ -797,6 +810,16 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
     }
     cover.createSpan({ cls: "mqe-shelf-type", text: this.typeLabel(record.type) });
     if (record.status !== "completed") cover.createSpan({ cls: "mqe-shelf-planned", text: this.typeGroup(record.type) === "book" ? "\u60F3\u8BFB" : "\u60F3\u770B" });
+    const edit = coverWrap.createEl("button", {
+      cls: "mqe-shelf-cover-edit",
+      attr: { type: "button", title: record.comment ? "\u7F16\u8F91\u77ED\u8BC4" : "\u6DFB\u52A0\u77ED\u8BC4", "aria-label": record.comment ? "\u7F16\u8F91\u77ED\u8BC4" : "\u6DFB\u52A0\u77ED\u8BC4" }
+    });
+    (0, import_obsidian5.setIcon)(edit, "pencil");
+    edit.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openCommentEditor(record);
+    });
     const title = card.createEl("a", { cls: "mqe-shelf-title internal-link", text: record.title, attr: { href: record.file.path, "data-href": record.file.path } });
     title.addEventListener("click", (event) => {
       event.preventDefault();
@@ -808,8 +831,16 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
   }
   renderRating(card, record) {
     const row = card.createDiv({ cls: "mqe-shelf-rating", attr: { "aria-label": record.rating > 0 ? `\u6211\u7684\u8BC4\u5206 ${record.rating} \u5206` : "\u672A\u8BC4\u5206" } });
+    this.renderRatingContent(row, record);
+  }
+  renderRatingContent(row, record) {
+    row.empty();
+    row.setAttribute("aria-label", record.rating > 0 ? `\u6211\u7684\u8BC4\u5206 ${record.rating} \u5206` : "\u672A\u8BC4\u5206");
+    if (this.activeCommentEditor?.file.path === record.file.path) {
+      this.renderCommentEditor(row, record);
+      return;
+    }
     const stars = row.createDiv({ cls: "mqe-shelf-stars" });
-    const buttons = [];
     const selected = Math.max(0, Math.min(5, Math.round(record.rating / 2)));
     for (let value = 1; value <= 5; value++) {
       const button = stars.createEl("button", { cls: `mqe-shelf-star${value <= selected ? " is-active" : ""}`, text: value <= selected ? "\u2605" : "\u2606", attr: { type: "button", title: `${value} \u661F`, "aria-label": `${value} \u661F` } });
@@ -818,32 +849,105 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
         event.stopPropagation();
         const previous = record.rating;
         record.rating = value * 2;
-        this.updateRating(buttons, score, record.rating);
+        this.openCommentEditor(record, row);
         try {
           await this.saveRating(record.file, value);
         } catch (error) {
           console.error(error);
           record.rating = previous;
-          this.updateRating(buttons, score, previous);
           new import_obsidian5.Notice(`\u8BC4\u5206\u4FDD\u5B58\u5931\u8D25\uFF1A${record.title}`);
         }
       });
-      buttons.push(button);
     }
     const score = row.createSpan({ cls: "mqe-shelf-score", text: record.rating > 0 ? record.rating.toFixed(1) : "\u672A\u8BC4\u5206" });
   }
-  updateRating(buttons, score, rating) {
-    const selected = Math.max(0, Math.min(5, Math.round(rating / 2)));
-    buttons.forEach((button, index) => {
-      button.toggleClass("is-active", index < selected);
-      button.setText(index < selected ? "\u2605" : "\u2606");
+  openCommentEditor(record, row) {
+    if (this.activeCommentEditor?.file.path === record.file.path) return;
+    if (this.activeCommentEditor) {
+      const previous = this.activeCommentEditor;
+      this.activeCommentEditor = null;
+      if (previous.draft !== previous.original) {
+        void this.saveComment(previous.file, previous.draft).catch((error) => {
+          console.error(error);
+          new import_obsidian5.Notice(`\u77ED\u8BC4\u4FDD\u5B58\u5931\u8D25\uFF1A${previous.file.basename}`);
+        });
+      }
+    }
+    this.activeCommentEditor = { file: record.file, original: record.comment, draft: record.comment };
+    if (row) this.renderRatingContent(row, record);
+    else this.applyView();
+  }
+  renderCommentEditor(row, record) {
+    const state = this.activeCommentEditor;
+    if (!state || state.file.path !== record.file.path) return;
+    const editor = row.createDiv({ cls: "mqe-shelf-comment-editor" });
+    const input = editor.createEl("input", {
+      cls: "mqe-shelf-comment-input",
+      type: "text",
+      value: state.draft,
+      attr: { placeholder: "\u5199\u77ED\u8BC4\u2026\u2026", "aria-label": `\u4E3A ${record.title} \u5199\u77ED\u8BC4` }
     });
-    score.setText(rating > 0 ? rating.toFixed(1) : "\u672A\u8BC4\u5206");
+    input.addEventListener("input", () => {
+      if (this.activeCommentEditor?.file.path === record.file.path) this.activeCommentEditor.draft = input.value;
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.cancelCommentEditor(record, row);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        void this.commitCommentEditor(record, row, input);
+      }
+    });
+    input.addEventListener("blur", () => {
+      if (input.isConnected) void this.commitCommentEditor(record, row, input);
+    });
+    if (this.commentFocusTimer !== null) window.clearTimeout(this.commentFocusTimer);
+    this.commentFocusTimer = window.setTimeout(() => {
+      this.commentFocusTimer = null;
+      if (!input.isConnected || this.activeCommentEditor?.file.path !== record.file.path) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }, 0);
+  }
+  cancelCommentEditor(record, row) {
+    if (this.activeCommentEditor?.file.path !== record.file.path) return;
+    this.activeCommentEditor = null;
+    this.renderRatingContent(row, record);
+  }
+  async commitCommentEditor(record, row, input) {
+    const state = this.activeCommentEditor;
+    if (!state || state.file.path !== record.file.path || this.commentCommitPath === record.file.path) return;
+    state.draft = input.value;
+    this.commentCommitPath = record.file.path;
+    this.activeCommentEditor = null;
+    this.renderRatingContent(row, record);
+    try {
+      if (state.draft !== state.original) {
+        await this.saveComment(record.file, state.draft);
+        record.comment = state.draft;
+      }
+    } catch (error) {
+      console.error(error);
+      this.activeCommentEditor = state;
+      this.commentCommitPath = "";
+      this.applyView();
+      new import_obsidian5.Notice(`\u77ED\u8BC4\u4FDD\u5B58\u5931\u8D25\uFF1A${record.title}`);
+      return;
+    }
+    this.commentCommitPath = "";
+    this.applyView();
   }
   async saveRating(file, stars) {
+    await this.savePatch(file, ratingPatch(stars));
+  }
+  async saveComment(file, comment) {
+    const type = this.app.metadataCache.getFileCache(file)?.frontmatter?.type === "book" ? "book" : "movie";
+    await this.savePatch(file, commentPatch(comment, this.owner.statusLabels(type).completed));
+  }
+  async savePatch(file, patch) {
     const previous = this.pending.get(file.path) ?? Promise.resolve();
     const next = previous.catch(() => void 0).then(async () => {
-      const patch = ratingPatch(stars);
       await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
         touchLastUpdated(frontmatter);
         applyStatusHistory(frontmatter, patch);

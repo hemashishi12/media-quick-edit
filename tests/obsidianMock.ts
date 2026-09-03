@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 
 export const requestUrl = vi.fn();
+export const setIcon = vi.fn();
 export const normalizePath = (value: string) => value.replace(/\\/g, "/").replace(/\/{2,}/g, "/").replace(/^\//, "").replace(/\/$/, "");
 export class App {}
 export class Component {
@@ -33,6 +34,17 @@ export class Modal extends Component {
   contentEl: any;
   open() {}
   close() {}
+}
+export class Menu {
+  addItem(callback: (item: any) => any) {
+    callback({
+      setTitle: () => this,
+      setIcon: () => this,
+      onClick: () => this
+    });
+    return this;
+  }
+  showAtMouseEvent() { return this; }
 }
 export class BasesView extends Component {
   config: any;
