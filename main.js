@@ -604,6 +604,14 @@ var import_obsidian5 = require("obsidian");
 var SHELF_VIEW_TYPE = "media-shelf";
 var BATCH_SIZE = 84;
 var collator2 = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
+function compareShelfRecords(left, right, sort) {
+  if (sort === "title") return collator2.compare(left.title, right.title);
+  if (sort === "rating") {
+    if (left.rating <= 0 !== right.rating <= 0) return left.rating <= 0 ? 1 : -1;
+    return right.rating - left.rating || right.modified - left.modified;
+  }
+  return right.finishedDate - left.finishedDate || right.modified - left.modified;
+}
 function normalizeCoverSource(value) {
   const candidate = Array.isArray(value) ? value.find((item) => typeof item === "string" && item.trim()) : value;
   if (typeof candidate !== "string") return "";
@@ -682,7 +690,7 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
       }, 120);
     });
     const sort = actions.createEl("select", { cls: "mqe-shelf-sort", attr: { "aria-label": "\u4E66\u67B6\u6392\u5E8F" } });
-    for (const [value, label] of [["recent", "\u6700\u8FD1\u6DFB\u52A0"], ["rating", "\u8BC4\u5206\u6700\u9AD8"], ["title", "\u6807\u9898\u6392\u5E8F"]]) {
+    for (const [value, label] of [["recent", "\u6700\u8FD1\u5B8C\u6210"], ["rating", "\u8BC4\u5206\u6700\u9AD8"], ["title", "\u6807\u9898\u6392\u5E8F"]]) {
       sort.createEl("option", { text: label, attr: { value } });
     }
     sort.value = this.sortState;
@@ -744,7 +752,7 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
       image,
       author: stringValue(frontmatter.author || frontmatter.director),
       year: stringValue(frontmatter.year || String(frontmatter.premiere || "").slice(0, 4)),
-      dateAdded: timestamp(frontmatter.date_added, file.stat.mtime),
+      finishedDate: timestamp(frontmatter.finished_date, 0),
       modified: file.stat.mtime
     };
   }
@@ -755,15 +763,7 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
       if (!query) return true;
       return `${record.title} ${record.author} ${record.year}`.toLocaleLowerCase("zh-CN").includes(query);
     });
-    const sort = this.sortState;
-    this.visibleRecords.sort((left, right) => {
-      if (sort === "title") return collator2.compare(left.title, right.title);
-      if (sort === "rating") {
-        if (left.rating <= 0 !== right.rating <= 0) return left.rating <= 0 ? 1 : -1;
-        return right.rating - left.rating || right.modified - left.modified;
-      }
-      return right.dateAdded - left.dateAdded || right.modified - left.modified;
-    });
+    this.visibleRecords.sort((left, right) => compareShelfRecords(left, right, this.sortState));
     this.gridEl.empty();
     this.renderedCount = 0;
     this.emptyEl.hidden = this.visibleRecords.length > 0;

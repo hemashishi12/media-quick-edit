@@ -1,6 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { CoverCache, coverCacheKey } from "../src/coverCache";
-import { MediaShelfView, coverVariantFor, normalizeCoverSource } from "../src/mediaShelfView";
+import { MediaShelfView, compareShelfRecords, coverVariantFor, normalizeCoverSource } from "../src/mediaShelfView";
+
+describe("bookshelf sorting", () => {
+  it("sorts the default view by finished date descending and puts missing dates last", () => {
+    const records = [
+      { title: "没有完成日期", rating: 10, finishedDate: 0, modified: 300 },
+      { title: "较早完成", rating: 10, finishedDate: Date.parse("2026-08-18"), modified: 200 },
+      { title: "最近完成", rating: 2, finishedDate: Date.parse("2026-09-03"), modified: 100 }
+    ];
+
+    expect(records.sort((left, right) => compareShelfRecords(left, right, "recent")).map((record) => record.title))
+      .toEqual(["最近完成", "较早完成", "没有完成日期"]);
+  });
+});
 
 describe("bookshelf cover handling", () => {
   it("normalizes common URL, Markdown, wiki-link and array cover fields", () => {

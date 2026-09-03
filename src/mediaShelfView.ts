@@ -5,7 +5,7 @@ import { touchLastUpdated } from "./lastUpdated";
 export const SHELF_VIEW_TYPE = "media-shelf";
 
 type ShelfFilter = "all" | "book" | "movie" | "series";
-type ShelfSort = "recent" | "rating" | "title";
+export type ShelfSort = "recent" | "rating" | "title";
 
 interface ShelfRecord {
   entry: any;
@@ -18,12 +18,23 @@ interface ShelfRecord {
   image: string;
   author: string;
   year: string;
-  dateAdded: number;
+  finishedDate: number;
   modified: number;
 }
 
 const BATCH_SIZE = 84;
 const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
+
+type ShelfRecordComparable = Pick<ShelfRecord, "title" | "rating" | "finishedDate" | "modified">;
+
+export function compareShelfRecords(left: ShelfRecordComparable, right: ShelfRecordComparable, sort: ShelfSort): number {
+  if (sort === "title") return collator.compare(left.title, right.title);
+  if (sort === "rating") {
+    if ((left.rating <= 0) !== (right.rating <= 0)) return left.rating <= 0 ? 1 : -1;
+    return right.rating - left.rating || right.modified - left.modified;
+  }
+  return right.finishedDate - left.finishedDate || right.modified - left.modified;
+}
 
 export function normalizeCoverSource(value: unknown): string {
   const candidate = Array.isArray(value) ? value.find((item) => typeof item === "string" && item.trim()) : value;
@@ -110,7 +121,7 @@ export class MediaShelfView extends BasesView {
     });
 
     const sort = actions.createEl("select", { cls: "mqe-shelf-sort", attr: { "aria-label": "书架排序" } });
-    for (const [value, label] of [["recent", "最近添加"], ["rating", "评分最高"], ["title", "标题排序"]] as const) {
+    for (const [value, label] of [["recent", "最近完成"], ["rating", "评分最高"], ["title", "标题排序"]] as const) {
       sort.createEl("option", { text: label, attr: { value } });
     }
     sort.value = this.sortState;
@@ -180,7 +191,7 @@ export class MediaShelfView extends BasesView {
       image,
       author: stringValue(frontmatter.author || frontmatter.director),
       year: stringValue(frontmatter.year || String(frontmatter.premiere || "").slice(0, 4)),
-      dateAdded: timestamp(frontmatter.date_added, file.stat.mtime),
+      finishedDate: timestamp(frontmatter.finished_date, 0),
       modified: file.stat.mtime
     };
   }
@@ -192,15 +203,7 @@ export class MediaShelfView extends BasesView {
       if (!query) return true;
       return `${record.title} ${record.author} ${record.year}`.toLocaleLowerCase("zh-CN").includes(query);
     });
-    const sort = this.sortState;
-    this.visibleRecords.sort((left, right) => {
-      if (sort === "title") return collator.compare(left.title, right.title);
-      if (sort === "rating") {
-        if ((left.rating <= 0) !== (right.rating <= 0)) return left.rating <= 0 ? 1 : -1;
-        return right.rating - left.rating || right.modified - left.modified;
-      }
-      return right.dateAdded - left.dateAdded || right.modified - left.modified;
-    });
+    this.visibleRecords.sort((left, right) => compareShelfRecords(left, right, this.sortState));
 
     this.gridEl.empty();
     this.renderedCount = 0;
