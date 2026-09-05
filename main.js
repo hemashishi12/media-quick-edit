@@ -656,6 +656,7 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
   activeCommentEditor = null;
   commentCommitPath = "";
   commentFocusTimer = null;
+  isRefreshing = false;
   constructor(controller, scrollEl) {
     super(controller);
     this.rootEl = scrollEl.createDiv({ cls: "mqe-shelf-view" });
@@ -730,10 +731,16 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
     return value === "rating" || value === "title" ? value : "recent";
   }
   refresh() {
-    this.ensureShell();
-    const entries = this.data?.data ?? [];
-    this.records = entries.map((entry) => this.readRecord(entry));
-    this.applyView();
+    const previousRefreshing = this.isRefreshing;
+    this.isRefreshing = true;
+    try {
+      this.ensureShell();
+      const entries = this.data?.data ?? [];
+      this.records = entries.map((entry) => this.readRecord(entry));
+      this.applyView();
+    } finally {
+      this.isRefreshing = previousRefreshing;
+    }
   }
   readRecord(entry) {
     const file = entry.file;
@@ -900,7 +907,7 @@ var MediaShelfView = class extends import_obsidian5.BasesView {
       }
     });
     input.addEventListener("blur", () => {
-      if (input.isConnected) void this.commitCommentEditor(record, row, input);
+      if (!this.isRefreshing && input.isConnected) void this.commitCommentEditor(record, row, input);
     });
     if (this.commentFocusTimer !== null) window.clearTimeout(this.commentFocusTimer);
     this.commentFocusTimer = window.setTimeout(() => {

@@ -84,6 +84,7 @@ export class MediaShelfView extends BasesView {
   private activeCommentEditor: { file: TFile; original: string; draft: string } | null = null;
   private commentCommitPath = "";
   private commentFocusTimer: number | null = null;
+  private isRefreshing = false;
 
   constructor(controller: any, scrollEl: HTMLElement) {
     super(controller);
@@ -168,10 +169,16 @@ export class MediaShelfView extends BasesView {
   }
 
   private refresh(): void {
-    this.ensureShell();
-    const entries = (this as any).data?.data ?? [];
-    this.records = entries.map((entry: any) => this.readRecord(entry));
-    this.applyView();
+    const previousRefreshing = this.isRefreshing;
+    this.isRefreshing = true;
+    try {
+      this.ensureShell();
+      const entries = (this as any).data?.data ?? [];
+      this.records = entries.map((entry: any) => this.readRecord(entry));
+      this.applyView();
+    } finally {
+      this.isRefreshing = previousRefreshing;
+    }
   }
 
   private readRecord(entry: any): ShelfRecord {
@@ -349,7 +356,7 @@ export class MediaShelfView extends BasesView {
       }
     });
     input.addEventListener("blur", () => {
-      if (input.isConnected) void this.commitCommentEditor(record, row, input);
+      if (!this.isRefreshing && input.isConnected) void this.commitCommentEditor(record, row, input);
     });
     if (this.commentFocusTimer !== null) window.clearTimeout(this.commentFocusTimer);
     this.commentFocusTimer = window.setTimeout(() => {

@@ -64,8 +64,9 @@ describe("Base view initial render", () => {
   it("builds the shell after Base data and config are available", () => {
     const view = {
       data: { data: [] },
-      ensureShell: vi.fn(),
-      applyView: vi.fn(),
+      isRefreshing: false,
+      ensureShell: vi.fn(() => expect(view.isRefreshing).toBe(true)),
+      applyView: vi.fn(() => expect(view.isRefreshing).toBe(true)),
       records: []
     } as any;
 
@@ -73,5 +74,43 @@ describe("Base view initial render", () => {
 
     expect(view.ensureShell).toHaveBeenCalledOnce();
     expect(view.applyView).toHaveBeenCalledOnce();
+    expect(view.isRefreshing).toBe(false);
+  });
+});
+
+describe("bookshelf comment editor lifecycle", () => {
+  it("does not commit when a refresh removes the focused input", () => {
+    const blurHandlers: Array<() => void> = [];
+    const input = {
+      value: "原短评",
+      isConnected: true,
+      addEventListener: vi.fn((event: string, handler: () => void) => {
+        if (event === "blur") blurHandlers.push(handler);
+      }),
+      focus: vi.fn(),
+      setSelectionRange: vi.fn()
+    };
+    const row = {
+      createDiv: vi.fn(() => ({})),
+      setAttribute: vi.fn()
+    };
+    const record = { file: { path: "Media DB/books/Example.md" }, title: "Example" };
+    const view = {
+      activeCommentEditor: { file: record.file, original: "原短评", draft: "原短评" },
+      commentFocusTimer: null,
+      isRefreshing: true,
+      commitCommentEditor: vi.fn()
+    } as any;
+    row.createDiv.mockReturnValue({ createEl: vi.fn(() => input) });
+    vi.stubGlobal("window", { clearTimeout: vi.fn(), setTimeout: vi.fn() });
+
+    (MediaShelfView.prototype as any).renderCommentEditor.call(view, row, record);
+    blurHandlers[0]();
+    expect(view.commitCommentEditor).not.toHaveBeenCalled();
+
+    view.isRefreshing = false;
+    blurHandlers[0]();
+    expect(view.commitCommentEditor).toHaveBeenCalledWith(record, row, input);
+    vi.unstubAllGlobals();
   });
 });
