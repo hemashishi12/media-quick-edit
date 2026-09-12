@@ -1066,7 +1066,7 @@ var MediaQuickEditSettingTab = class extends import_obsidian6.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Media Quick Edit" });
+    new import_obsidian6.Setting(containerEl).setName("Media Quick Edit").setHeading();
     new import_obsidian6.Setting(containerEl).setName("TMDB API Key").setDesc("\u4EC5\u4FDD\u5B58\u5728\u5F53\u524D Vault \u7684\u63D2\u4EF6 data.json \u4E2D\uFF0C\u4E0D\u4F1A\u53D1\u9001\u5230\u63D2\u4EF6\u4F5C\u8005\u7684\u670D\u52A1\u5668\u3002").addText((text) => {
       text.setPlaceholder("\u8F93\u5165 TMDB v3 API Key").setValue(this.owner.settings.tmdbApiKey);
       text.inputEl.type = "password";
@@ -1078,7 +1078,7 @@ var MediaQuickEditSettingTab = class extends import_obsidian6.PluginSettingTab {
     this.addPath("\u9ED8\u8BA4 Base", "basePath", "\u9009\u62E9\u5DE6\u4FA7\u680F\u6309\u94AE\u6253\u5F00\u7684 .base \u6587\u4EF6", "base");
     new import_obsidian6.Setting(containerEl).setName("\u81EA\u52A8\u6253\u5F00\u65B0\u6761\u76EE").addToggle((toggle) => toggle.setValue(this.owner.settings.autoOpenNewEntry).onChange((value) => this.setValue("autoOpenNewEntry", value)));
     new import_obsidian6.Setting(containerEl).setName("\u9ED8\u8BA4\u6DFB\u52A0\u7C7B\u578B").addDropdown((dropdown) => dropdown.addOption("movie", "\u7535\u5F71 / \u5267\u96C6").addOption("book", "\u4E66\u7C4D").setValue(this.owner.settings.defaultAddType).onChange((value) => this.setValue("defaultAddType", value)));
-    containerEl.createEl("h3", { text: "\u72B6\u6001\u6807\u7B7E" });
+    new import_obsidian6.Setting(containerEl).setName("\u72B6\u6001\u6807\u7B7E").setHeading();
     this.addLabel("\u7535\u5F71\uFF1A\u8BA1\u5212\u72B6\u6001", "moviePlannedLabel", "\u60F3\u770B");
     this.addLabel("\u7535\u5F71\uFF1A\u5B8C\u6210\u72B6\u6001", "movieCompletedLabel", "\u770B\u8FC7");
     this.addLabel("\u4E66\u7C4D\uFF1A\u8BA1\u5212\u72B6\u6001", "bookPlannedLabel", "\u60F3\u8BFB");

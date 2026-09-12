@@ -42,7 +42,7 @@ export class MediaQuickEditSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Media Quick Edit" });
+    new Setting(containerEl).setName("Media Quick Edit").setHeading();
     new Setting(containerEl).setName("TMDB API Key").setDesc("仅保存在当前 Vault 的插件 data.json 中，不会发送到插件作者的服务器。").addText((text) => {
       text.setPlaceholder("输入 TMDB v3 API Key").setValue(this.owner.settings.tmdbApiKey);
       text.inputEl.type = "password";
@@ -54,7 +54,7 @@ export class MediaQuickEditSettingTab extends PluginSettingTab {
     this.addPath("默认 Base", "basePath", "选择左侧栏按钮打开的 .base 文件", "base");
     new Setting(containerEl).setName("自动打开新条目").addToggle((toggle) => toggle.setValue(this.owner.settings.autoOpenNewEntry).onChange((value) => this.setValue("autoOpenNewEntry", value)));
     new Setting(containerEl).setName("默认添加类型").addDropdown((dropdown) => dropdown.addOption("movie", "电影 / 剧集").addOption("book", "书籍").setValue(this.owner.settings.defaultAddType).onChange((value) => this.setValue("defaultAddType", value)));
-    containerEl.createEl("h3", { text: "状态标签" });
+    new Setting(containerEl).setName("状态标签").setHeading();
     this.addLabel("电影：计划状态", "moviePlannedLabel", "想看");
     this.addLabel("电影：完成状态", "movieCompletedLabel", "看过");
     this.addLabel("书籍：计划状态", "bookPlannedLabel", "想读");
