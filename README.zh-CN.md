@@ -180,7 +180,7 @@ npm run release:prepare
 
 该命令会生成 `release/<版本>/main.js`、`manifest.json` 和 `styles.css`，但不会自动上传。
 
-当前 `0.6.1` 版本包含书架视图、可编辑评论、按完成日期排序以及最新更新时间修复。请将准备好的文件作为 GitHub Release 资产上传，并确保标签与 `manifest.json` 中的版本一致，然后再在 Obsidian Community Directory 中提交或发布插件。
+当前 `0.6.2` 版本包含书架视图、可编辑评论、按完成日期排序、最新更新时间修复以及 Community Directory 检查修复。请将准备好的文件作为 GitHub Release 资产上传，并确保标签与 `manifest.json` 中的版本一致，然后再在 Obsidian Community Directory 中提交或发布插件。
 
 ## 许可证
 

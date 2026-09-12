@@ -180,7 +180,7 @@ npm run release:prepare
 
 This creates `release/<version>/main.js`, `manifest.json`, and `styles.css` without uploading anything.
 
-The current `0.6.1` release includes the Bookshelf view, editable comments, finished-date sorting, and the latest-updated metadata fixes. Publish the prepared files as GitHub Release assets with a tag matching `manifest.json` before submitting or publishing the plugin in the Obsidian Community Directory.
+The current `0.6.2` release includes the Bookshelf view, editable comments, finished-date sorting, latest-updated metadata fixes, and Community Directory review fixes. Publish the prepared files as GitHub Release assets with a tag matching `manifest.json` before submitting or publishing the plugin in the Obsidian Community Directory.
 
 ## License
 

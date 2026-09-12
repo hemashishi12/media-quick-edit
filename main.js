@@ -1066,7 +1066,7 @@ var MediaQuickEditSettingTab = class extends import_obsidian6.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian6.Setting(containerEl).setName("Media Quick Edit").setHeading();
+    new import_obsidian6.Setting(containerEl).setName("\u5A92\u4F53\u5E93\u8BBE\u7F6E").setHeading();
     new import_obsidian6.Setting(containerEl).setName("TMDB API Key").setDesc("\u4EC5\u4FDD\u5B58\u5728\u5F53\u524D Vault \u7684\u63D2\u4EF6 data.json \u4E2D\uFF0C\u4E0D\u4F1A\u53D1\u9001\u5230\u63D2\u4EF6\u4F5C\u8005\u7684\u670D\u52A1\u5668\u3002").addText((text) => {
       text.setPlaceholder("\u8F93\u5165 TMDB v3 API Key").setValue(this.owner.settings.tmdbApiKey);
       text.inputEl.type = "password";

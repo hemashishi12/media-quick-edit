@@ -42,7 +42,7 @@ export class MediaQuickEditSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    new Setting(containerEl).setName("Media Quick Edit").setHeading();
+    new Setting(containerEl).setName("媒体库设置").setHeading();
     new Setting(containerEl).setName("TMDB API Key").setDesc("仅保存在当前 Vault 的插件 data.json 中，不会发送到插件作者的服务器。").addText((text) => {
       text.setPlaceholder("输入 TMDB v3 API Key").setValue(this.owner.settings.tmdbApiKey);
       text.inputEl.type = "password";
